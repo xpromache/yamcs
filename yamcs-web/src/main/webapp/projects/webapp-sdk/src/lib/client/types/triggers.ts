@@ -2,6 +2,8 @@ import { WebSocketCall } from '../WebSocketCall';
 import { AlarmNotificationType, AlarmSeverity } from './alarms';
 import { ActivityDefinition } from './timeline';
 
+export type TriggerSource = 'DATABASE' | 'CONFIG';
+
 export type TriggerAlarmType = 'PARAMETER' | 'EVENT';
 
 export type TriggerEdge = 'RISING' | 'FALLING' | 'BOTH';
@@ -25,6 +27,8 @@ export interface Trigger {
   enabled: boolean;
   processor?: string;
   runAs?: string;
+  owner?: string;
+  source: TriggerSource;
   alarmCondition?: AlarmCondition;
   parameterCondition?: ParameterCondition;
   policy?: TriggerPolicy;
@@ -65,6 +69,18 @@ export interface TriggerPolicy {
   maxFiringsPerHour?: number;
 }
 
+export interface SaveTriggerRequest {
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  processor?: string;
+  runAs?: string;
+  alarmCondition?: AlarmCondition;
+  parameterCondition?: ParameterCondition;
+  policy?: TriggerPolicy;
+  activity: ActivityDefinition & { label?: string };
+}
+
 export interface ListTriggersResponse {
   triggers?: Trigger[];
 }
@@ -72,6 +88,15 @@ export interface ListTriggersResponse {
 export interface TriggerServiceStatus {
   enabled: boolean;
   pendingConfirmations?: number;
+}
+
+export interface TestTriggerRequest {
+  context?: { [key: string]: any };
+}
+
+export interface TestTriggerResponse {
+  activity?: ActivityDefinition & { label?: string };
+  error?: string;
 }
 
 export interface TriggerFiring {

@@ -12,6 +12,8 @@ import org.yamcs.http.Context;
 import org.yamcs.http.NotFoundException;
 import org.yamcs.protobuf.activities.AbstractActivityTriggersApi;
 import org.yamcs.protobuf.activities.ConfirmTriggerFiringRequest;
+import org.yamcs.protobuf.activities.CreateTriggerRequest;
+import org.yamcs.protobuf.activities.DeleteTriggerRequest;
 import org.yamcs.protobuf.activities.DisableAllTriggersRequest;
 import org.yamcs.protobuf.activities.DisableTriggerRequest;
 import org.yamcs.protobuf.activities.EnableAllTriggersRequest;
@@ -24,11 +26,16 @@ import org.yamcs.protobuf.activities.ListTriggersRequest;
 import org.yamcs.protobuf.activities.ListTriggersResponse;
 import org.yamcs.protobuf.activities.RejectTriggerFiringRequest;
 import org.yamcs.protobuf.activities.SubscribeTriggerFiringsRequest;
+import org.yamcs.protobuf.activities.TestTriggerRequest;
+import org.yamcs.protobuf.activities.TestTriggerResponse;
 import org.yamcs.protobuf.activities.TriggerFiringInfo;
 import org.yamcs.protobuf.activities.TriggerInfo;
 import org.yamcs.protobuf.activities.TriggerServiceStatus;
+import org.yamcs.protobuf.activities.UpdateTriggerRequest;
 import org.yamcs.security.SystemPrivilege;
 import org.yamcs.utils.TimeEncoding;
+
+import com.google.protobuf.Empty;
 
 public class ActivityTriggersApi extends AbstractActivityTriggersApi<Context> {
 
@@ -46,6 +53,57 @@ public class ActivityTriggersApi extends AbstractActivityTriggersApi<Context> {
         ctx.checkAnyOfSystemPrivileges(SystemPrivilege.ReadActivityTriggers, SystemPrivilege.ControlActivityTriggers);
         var service = verifyService(request.getInstance());
         observer.complete(verifyTrigger(service, request.getTrigger()));
+    }
+
+    @Override
+    public void createTrigger(Context ctx, CreateTriggerRequest request, Observer<TriggerInfo> observer) {
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlActivityTriggers);
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlActivities);
+        var service = verifyService(request.getInstance());
+        if (!request.hasTrigger()) {
+            throw new BadRequestException("No trigger definition provided");
+        }
+        try {
+            observer.complete(service.createTrigger(request.getTrigger(), ctx.user));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+    }
+
+    @Override
+    public void updateTrigger(Context ctx, UpdateTriggerRequest request, Observer<TriggerInfo> observer) {
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlActivityTriggers);
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlActivities);
+        var service = verifyService(request.getInstance());
+        if (!request.hasTrigger()) {
+            throw new BadRequestException("No trigger definition provided");
+        }
+        TriggerInfo trigger;
+        try {
+            trigger = service.updateTrigger(request.getId(), request.getTrigger(), ctx.user);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+        if (trigger == null) {
+            throw new NotFoundException("Trigger '" + request.getId() + "' not found");
+        }
+        observer.complete(trigger);
+    }
+
+    @Override
+    public void deleteTrigger(Context ctx, DeleteTriggerRequest request, Observer<Empty> observer) {
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlActivityTriggers);
+        var service = verifyService(request.getInstance());
+        boolean deleted;
+        try {
+            deleted = service.deleteTrigger(request.getTrigger(), ctx.user);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+        if (!deleted) {
+            throw new NotFoundException("Trigger '" + request.getTrigger() + "' not found");
+        }
+        observer.complete(Empty.getDefaultInstance());
     }
 
     @Override
@@ -94,6 +152,25 @@ public class ActivityTriggersApi extends AbstractActivityTriggersApi<Context> {
         ctx.checkAnyOfSystemPrivileges(SystemPrivilege.ReadActivityTriggers, SystemPrivilege.ControlActivityTriggers);
         var service = verifyService(request.getInstance());
         observer.complete(toStatus(service));
+    }
+
+    @Override
+    public void testTrigger(Context ctx, TestTriggerRequest request, Observer<TestTriggerResponse> observer) {
+        ctx.checkAnyOfSystemPrivileges(SystemPrivilege.ReadActivityTriggers, SystemPrivilege.ControlActivityTriggers);
+        var service = verifyService(request.getInstance());
+        var sampleContext = request.hasContext() ? GpbWellKnownHelper.toJava(request.getContext()) : null;
+
+        var responseb = TestTriggerResponse.newBuilder();
+        try {
+            var activity = service.testTrigger(request.getTrigger(), sampleContext);
+            if (activity == null) {
+                throw new NotFoundException("Trigger '" + request.getTrigger() + "' not found");
+            }
+            responseb.setActivity(activity);
+        } catch (IllegalArgumentException e) {
+            responseb.setError(e.getMessage());
+        }
+        observer.complete(responseb.build());
     }
 
     @Override

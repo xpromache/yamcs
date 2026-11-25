@@ -142,16 +142,14 @@ Safety
 
 * Each trigger can be enabled or disabled individually.
 * All triggers can be stopped at once with ``POST /api/activities/{instance}/triggers:disableAll``. This setting is remembered across restarts.
-* Each trigger runs its activity on behalf of a user: the ``runAs`` user if set, otherwise the built-in ``System`` user. If the user no longer exists, is inactive or lacks the ``ControlActivities`` privilege, the firing fails.
+* Each trigger runs its activity on behalf of a user: the ``runAs`` user if set, otherwise the user who created or last updated the trigger. Triggers from the configuration without ``runAs`` use the built-in ``System`` user. Only superusers can set ``runAs`` to another user. If the user no longer exists, is inactive or lacks the ``ControlActivities`` privilege, the firing fails.
 * Each firing is recorded, including those that were suppressed. Started, pending, failed and expired firings also generate an event with source ``ActivityTrigger``.
 
 
 Configuration
 -------------
 
-Triggers are declared in the service configuration. Changes take effect when the instance is restarted. The server refuses to start the instance if a trigger refers to an unknown parameter or activity type.
-
-Through the API or the web interface, triggers can be enabled and disabled. This lasts until the next restart.
+Triggers can be created through the HTTP API, or declared in the service configuration. Triggers from the configuration cannot be modified or deleted through the API, but they can be enabled and disabled until the next restart.
 
 .. code-block:: yaml
     :caption: :file:`etc/yamcs.{instance}.yaml`

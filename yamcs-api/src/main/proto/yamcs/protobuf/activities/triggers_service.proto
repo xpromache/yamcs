@@ -6,9 +6,12 @@ option java_package = "org.yamcs.protobuf.activities";
 option java_outer_classname = "TriggersServiceProto";
 option java_multiple_files = true;
 
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 import "yamcs/api/annotations.proto";
+import "yamcs/protobuf/activities/activities.proto";
 import "yamcs/protobuf/activities/triggers.proto";
 
 // Start activities automatically when an alarm occurs, or when
@@ -30,6 +33,57 @@ service ActivityTriggersApi {
   rpc GetTrigger(GetTriggerRequest) returns (TriggerInfo) {
     option (yamcs.api.route) = {
       get: "/api/activities/{instance}/triggers/{trigger}"
+    };
+  }
+
+  // Create a trigger
+  //
+  // Example:
+  // ```json
+  // {
+  //   "name": "battery-critical",
+  //   "enabled": true,
+  //   "alarmCondition": {
+  //     "alarmType": "PARAMETER",
+  //     "subjects": ["/YSS/SIMULATOR/BatteryVoltage*"],
+  //     "minSeverity": "CRITICAL"
+  //   },
+  //   "policy": {
+  //     "cooldown": 600000,
+  //     "requireConfirmation": true
+  //   },
+  //   "activity": {
+  //     "type": "SCRIPT",
+  //     "args": {
+  //       "script": "safe_mode.py",
+  //       "args": ["--reason", "${alarm.subject} ${alarm.severity}"]
+  //     }
+  //   }
+  // }
+  // ```
+  rpc CreateTrigger(CreateTriggerRequest) returns (TriggerInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/activities/{instance}/triggers"
+      body: "trigger"
+    };
+  }
+
+  // Update a trigger
+  //
+  // The provided definition replaces the existing one. The fields
+  // ``id``, ``source``, ``owner``, ``lastFired`` and ``firingCount``
+  // are ignored.
+  rpc UpdateTrigger(UpdateTriggerRequest) returns (TriggerInfo) {
+    option (yamcs.api.route) = {
+      put: "/api/activities/{instance}/triggers/{id}"
+      body: "trigger"
+    };
+  }
+
+  // Delete a trigger
+  rpc DeleteTrigger(DeleteTriggerRequest) returns (google.protobuf.Empty) {
+    option (yamcs.api.route) = {
+      delete: "/api/activities/{instance}/triggers/{trigger}"
     };
   }
 
@@ -67,6 +121,15 @@ service ActivityTriggersApi {
   rpc GetTriggerServiceStatus(GetTriggerServiceStatusRequest) returns (TriggerServiceStatus) {
     option (yamcs.api.route) = {
       get: "/api/activities/{instance}/trigger-status"
+    };
+  }
+
+  // Validate a trigger and resolve its activity arguments against
+  // a sample context, without starting anything
+  rpc TestTrigger(TestTriggerRequest) returns (TestTriggerResponse) {
+    option (yamcs.api.route) = {
+      post: "/api/activities/{instance}/triggers/{trigger}:test"
+      body: "*"
     };
   }
 
@@ -117,6 +180,33 @@ message GetTriggerRequest {
   optional string trigger = 2;
 }
 
+message CreateTriggerRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Trigger definition
+  optional TriggerInfo trigger = 2;
+}
+
+message UpdateTriggerRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Trigger identifier
+  optional string id = 2;
+
+  // Trigger definition
+  optional TriggerInfo trigger = 3;
+}
+
+message DeleteTriggerRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Trigger identifier or name
+  optional string trigger = 2;
+}
+
 message EnableTriggerRequest {
   // Yamcs instance name
   optional string instance = 1;
@@ -154,6 +244,26 @@ message TriggerServiceStatus {
 
   // Number of firings waiting for confirmation
   optional int32 pendingConfirmations = 2;
+}
+
+message TestTriggerRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Trigger identifier or name
+  optional string trigger = 2;
+
+  // Context values used to resolve placeholders. For example:
+  // ``{"alarm.subject": "/YSS/SIMULATOR/BatteryVoltage2", "value": 9.7}``
+  optional google.protobuf.Struct context = 3;
+}
+
+message TestTriggerResponse {
+  // Activity that would be started
+  optional ActivityDefinitionInfo activity = 1;
+
+  // Validation problem, if any
+  optional string error = 2;
 }
 
 message ListTriggerFiringsRequest {

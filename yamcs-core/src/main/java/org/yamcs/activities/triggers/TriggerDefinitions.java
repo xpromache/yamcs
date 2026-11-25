@@ -1,12 +1,10 @@
 package org.yamcs.activities.triggers;
 
 import java.nio.charset.StandardCharsets;
-import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import org.yamcs.Spec;
@@ -15,7 +13,6 @@ import org.yamcs.Spec.ValidationContext;
 import org.yamcs.ValidationException;
 import org.yamcs.YConfiguration;
 import org.yamcs.client.utils.WellKnownTypes;
-import org.yamcs.mdb.Mdb;
 import org.yamcs.protobuf.AlarmNotificationType;
 import org.yamcs.protobuf.AlarmSeverity;
 import org.yamcs.protobuf.activities.ActivityDefinitionInfo;
@@ -26,12 +23,13 @@ import org.yamcs.protobuf.activities.ParameterCondition.Edge;
 import org.yamcs.protobuf.activities.TriggerInfo;
 import org.yamcs.protobuf.activities.TriggerPolicy;
 import org.yamcs.protobuf.activities.TriggerPolicy.Concurrency;
+import org.yamcs.protobuf.activities.TriggerSource;
 
 /**
  * Conversion, defaults and validation of trigger definitions.
  * <p>
- * Triggers are declared in the service configuration, and converted to {@link TriggerInfo} messages, the
- * representation used by the API.
+ * Definitions are represented by {@link TriggerInfo} messages, both in the API and in storage. Triggers declared in
+ * the service configuration are converted to the same representation.
  */
 public class TriggerDefinitions {
 
@@ -100,7 +98,8 @@ public class TriggerDefinitions {
     public static TriggerInfo fromConfig(YConfiguration config) throws ValidationException {
         var b = TriggerInfo.newBuilder()
                 .setName(config.getString("name"))
-                .setEnabled(config.getBoolean("enabled", true));
+                .setEnabled(config.getBoolean("enabled", true))
+                .setSource(TriggerSource.CONFIG);
         b.setId(UUID.nameUUIDFromBytes(("config:" + b.getName()).getBytes(StandardCharsets.UTF_8)).toString());
         if (config.containsKey("description")) {
             b.setDescription(config.getString("description"));
@@ -200,6 +199,9 @@ public class TriggerDefinitions {
         if (!b.hasProcessor()) {
             b.setProcessor(DEFAULT_PROCESSOR);
         }
+        if (!b.hasSource()) {
+            b.setSource(TriggerSource.DATABASE);
+        }
         if (b.hasAlarmCondition()) {
             var ab = b.getAlarmConditionBuilder();
             if (!ab.hasAlarmType()) {
@@ -282,30 +284,6 @@ public class TriggerDefinitions {
         }
         if (policy.getMaxFiringsPerHour() < 0) {
             errors.add("maxFiringsPerHour cannot be negative");
-        }
-        return errors;
-    }
-
-    /**
-     * Checks what {@link #validate(TriggerInfo)} cannot: that the parameters of the expression exist in the MDB, and
-     * that the activity type is known.
-     *
-     * @return a list of problems, empty if there are none
-     */
-    public static List<String> validateReferences(TriggerInfo trigger, Mdb mdb, Predicate<String> activityTypeExists) {
-        var errors = new ArrayList<String>();
-        if (trigger.hasActivity() && trigger.getActivity().hasType()) {
-            var type = trigger.getActivity().getType();
-            if (!activityTypeExists.test(type)) {
-                errors.add("Unknown activity type '" + type + "'");
-            }
-        }
-        if (trigger.hasParameterCondition() && trigger.getParameterCondition().hasExpression()) {
-            try {
-                new ConditionExpressionParser(mdb).parse(trigger.getParameterCondition().getExpression());
-            } catch (ParseException e) {
-                errors.add("Invalid expression: " + e.getMessage());
-            }
         }
         return errors;
     }

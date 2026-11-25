@@ -7,13 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 import org.yamcs.ValidationException;
 import org.yamcs.YConfiguration;
-import org.yamcs.mdb.MdbFactory;
 import org.yamcs.protobuf.AlarmNotificationType;
 import org.yamcs.protobuf.AlarmSeverity;
 import org.yamcs.protobuf.activities.ActivityDefinitionInfo;
@@ -22,6 +19,7 @@ import org.yamcs.protobuf.activities.ParameterCondition;
 import org.yamcs.protobuf.activities.ParameterCondition.Edge;
 import org.yamcs.protobuf.activities.TriggerInfo;
 import org.yamcs.protobuf.activities.TriggerPolicy.Concurrency;
+import org.yamcs.protobuf.activities.TriggerSource;
 
 public class TriggerDefinitionsTest {
 
@@ -53,6 +51,7 @@ public class TriggerDefinitionsTest {
 
         var trigger = TriggerDefinitions.fromConfig(config);
         assertEquals("battery-critical", trigger.getName());
+        assertEquals(TriggerSource.CONFIG, trigger.getSource());
         assertTrue(trigger.getEnabled());
         assertEquals("realtime", trigger.getProcessor());
 
@@ -102,32 +101,6 @@ public class TriggerDefinitionsTest {
         assertFalse(errors.isEmpty());
         assertTrue(errors.contains("Name is required"));
         assertTrue(errors.contains("Activity type is required"));
-    }
-
-    @Test
-    public void testValidateReferences() throws Exception {
-        YConfiguration.setupTest("refmdb");
-        MdbFactory.reset();
-        var mdb = MdbFactory.createInstanceByConfig("refmdb");
-        Predicate<String> knownTypes = Set.of("MANUAL", "COMMAND")::contains;
-
-        var valid = TriggerInfo.newBuilder()
-                .setName("t")
-                .setParameterCondition(ParameterCondition.newBuilder()
-                        .setExpression("/REFMDB/SUBSYS1/IntegerPara1_1 > 10"))
-                .setActivity(ActivityDefinitionInfo.newBuilder().setType("COMMAND"))
-                .build();
-        assertTrue(TriggerDefinitions.validateReferences(valid, mdb, knownTypes).isEmpty());
-
-        var invalid = valid.toBuilder()
-                .setParameterCondition(ParameterCondition.newBuilder()
-                        .setExpression("/REFMDB/SUBSYS1/NoSuchParameter > 10"))
-                .setActivity(ActivityDefinitionInfo.newBuilder().setType("NO_SUCH_TYPE"))
-                .build();
-        var errors = TriggerDefinitions.validateReferences(invalid, mdb, knownTypes);
-        assertEquals(2, errors.size(), errors.toString());
-        assertTrue(errors.contains("Unknown activity type 'NO_SUCH_TYPE'"), errors.toString());
-        assertTrue(errors.get(1).contains("NoSuchParameter"), errors.toString());
     }
 
     @Test

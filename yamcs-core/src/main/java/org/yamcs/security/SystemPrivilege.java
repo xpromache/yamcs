@@ -38,7 +38,7 @@ public class SystemPrivilege {
     public static final SystemPrivilege ControlActivities = new SystemPrivilege("ControlActivities");
 
     /**
-     * Allows to enable and disable activity triggers
+     * Allows to create, modify and enable activity triggers
      */
     public static final SystemPrivilege ControlActivityTriggers = new SystemPrivilege("ControlActivityTriggers");
 

@@ -39,8 +39,8 @@
           <span class="subtitle">
             Started by trigger
             <a
-              routerLink="/activities/trigger-firings"
-              [queryParams]="{ c: yamcs.context, trigger: activity.origin!.ref }">
+              [routerLink]="['/activities/triggers', activity.origin!.ref]"
+              [queryParams]="{ c: yamcs.context }">
               {{ activity.origin!.name || activity.origin!.ref }}
             </a>
           </span>

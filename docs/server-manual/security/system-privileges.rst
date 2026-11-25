@@ -43,7 +43,7 @@ ReadActivityTriggers
     Allows to read activity triggers and their firings.
 
 ControlActivityTriggers
-    Allows to enable and disable activity triggers.
+    Allows to create, modify, enable and disable activity triggers.
 
 ControlArchiving
     Allows to manage archiving properties of Yamcs.

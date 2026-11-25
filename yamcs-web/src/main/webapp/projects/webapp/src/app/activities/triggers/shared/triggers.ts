@@ -31,6 +31,17 @@ export function mayToggleTriggers(authService: AuthService) {
   return authService.getUser()!.hasSystemPrivilege('ControlActivityTriggers');
 }
 
+/**
+ * Create, update or delete triggers
+ */
+export function mayEditTriggers(authService: AuthService) {
+  const user = authService.getUser()!;
+  return (
+    user.hasSystemPrivilege('ControlActivityTriggers') &&
+    user.hasSystemPrivilege('ControlActivities')
+  );
+}
+
 export const mayReadTriggersGuardFn: CanActivateFn = (route, state) => {
   if (!hasTriggerService(inject(YamcsService))) {
     return inject(Router).createUrlTree(['/activities'], {
@@ -109,4 +120,14 @@ export function activitySummary(trigger: Trigger) {
     detail = activity.description;
   }
   return detail ? `${activity.type}: ${detail}` : activity.type;
+}
+
+/**
+ * Protobuf int64 fields may be encoded as JSON strings
+ */
+export function toNumber(value: number | string | undefined | null) {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  return Number(value);
 }

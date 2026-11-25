@@ -30,8 +30,14 @@ message TriggerInfo {
   optional string processor = 5;
 
   // User whose privileges are used to start the activity.
-  // Defaults to the built-in System user.
+  // Defaults to the user that created or last updated the trigger.
   optional string runAs = 6;
+
+  // User that created or last updated this trigger
+  optional string owner = 7;
+
+  // Where this trigger was defined
+  optional TriggerSource source = 8;
 
   // Condition that makes this trigger fire.
   // Exactly one of alarmCondition or parameterCondition is set.
@@ -50,6 +56,14 @@ message TriggerInfo {
 
   // Number of firings since server start (output only)
   optional int32 firingCount = 14;
+}
+
+enum TriggerSource {
+  // Created through the API
+  DATABASE = 1;
+
+  // Declared in the service configuration. Read-only.
+  CONFIG = 2;
 }
 
 message AlarmCondition {

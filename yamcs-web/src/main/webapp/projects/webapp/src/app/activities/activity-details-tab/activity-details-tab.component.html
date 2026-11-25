@@ -23,8 +23,8 @@
             Started by trigger
             @if (origin.ref) {
               <a
-                routerLink="/activities/trigger-firings"
-                [queryParams]="{ c: yamcs.context, trigger: origin.ref }">
+                [routerLink]="['/activities/triggers', origin.ref]"
+                [queryParams]="{ c: yamcs.context }">
                 {{ origin.name || origin.ref }}
               </a>
             } @else {

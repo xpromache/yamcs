@@ -14,6 +14,7 @@ import { ActivitiesPageTabsComponent } from '../shared/activities-page-tabs.comp
 import {
   activitySummary,
   conditionSummary,
+  mayEditTriggers,
   mayToggleTriggers,
 } from '../shared/triggers';
 
@@ -37,6 +38,7 @@ export class TriggerListComponent implements OnDestroy {
     'activity',
     'lastFired',
     'firingCount',
+    'actions',
   ];
 
   conditionSummary = conditionSummary;
@@ -59,6 +61,10 @@ export class TriggerListComponent implements OnDestroy {
 
   mayToggle() {
     return mayToggleTriggers(this.authService);
+  }
+
+  mayEdit() {
+    return mayEditTriggers(this.authService);
   }
 
   refresh() {
@@ -98,6 +104,19 @@ export class TriggerListComponent implements OnDestroy {
         this.messageService.showError(err);
         this.refresh();
       });
+  }
+
+  deleteTrigger(trigger: Trigger) {
+    if (
+      !confirm(`Are you sure you want to delete trigger '${trigger.name}'?`)
+    ) {
+      return;
+    }
+    const { yamcs } = this;
+    yamcs.yamcsClient
+      .deleteTrigger(yamcs.instance!, trigger.id)
+      .then(() => this.refresh())
+      .catch((err) => this.messageService.showError(err));
   }
 
   private replaceTrigger(updated: Trigger) {

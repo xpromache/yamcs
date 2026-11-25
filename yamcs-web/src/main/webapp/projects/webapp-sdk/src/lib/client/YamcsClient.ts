@@ -28,7 +28,10 @@ import {
   GetTriggerFiringsOptions,
   ListTriggerFiringsResponse,
   ListTriggersResponse,
+  SaveTriggerRequest,
   SubscribeTriggerFiringsRequest,
+  TestTriggerRequest,
+  TestTriggerResponse,
   Trigger,
   TriggerFiring,
   TriggerFiringSubscription,
@@ -2236,6 +2239,35 @@ export default class YamcsClient implements HttpHandler {
     return (await response.json()) as Trigger;
   }
 
+  async createTrigger(instance: string, options: SaveTriggerRequest) {
+    const url = `${this.apiUrl}/activities/${instance}/triggers`;
+    const body = JSON.stringify(options);
+    const response = await this.doFetch(url, {
+      body,
+      method: 'POST',
+    });
+    return (await response.json()) as Trigger;
+  }
+
+  async updateTrigger(
+    instance: string,
+    id: string,
+    options: SaveTriggerRequest,
+  ) {
+    const url = `${this.apiUrl}/activities/${instance}/triggers/${id}`;
+    const body = JSON.stringify(options);
+    const response = await this.doFetch(url, {
+      body,
+      method: 'PUT',
+    });
+    return (await response.json()) as Trigger;
+  }
+
+  async deleteTrigger(instance: string, trigger: string) {
+    const url = `${this.apiUrl}/activities/${instance}/triggers/${encodeURIComponent(trigger)}`;
+    return await this.doFetch(url, { method: 'DELETE' });
+  }
+
   async enableTrigger(instance: string, trigger: string) {
     const url = `${this.apiUrl}/activities/${instance}/triggers/${encodeURIComponent(trigger)}:enable`;
     const response = await this.doFetch(url, { method: 'POST' });
@@ -2264,6 +2296,20 @@ export default class YamcsClient implements HttpHandler {
     const url = `${this.apiUrl}/activities/${instance}/trigger-status`;
     const response = await this.doFetch(url);
     return (await response.json()) as TriggerServiceStatus;
+  }
+
+  async testTrigger(
+    instance: string,
+    trigger: string,
+    options: TestTriggerRequest = {},
+  ) {
+    const url = `${this.apiUrl}/activities/${instance}/triggers/${encodeURIComponent(trigger)}:test`;
+    const body = JSON.stringify(options);
+    const response = await this.doFetch(url, {
+      body,
+      method: 'POST',
+    });
+    return (await response.json()) as TestTriggerResponse;
   }
 
   async getTriggerFirings(

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -18,25 +19,37 @@ import org.yamcs.api.Observer;
 import org.yamcs.client.ClientException;
 import org.yamcs.client.base.ResponseObserver;
 import org.yamcs.client.processor.ProcessorClient;
+import org.yamcs.client.utils.WellKnownTypes;
+import org.yamcs.protobuf.AlarmSeverity;
 import org.yamcs.protobuf.CreateEventRequest;
 import org.yamcs.protobuf.activities.ActivitiesApiClient;
+import org.yamcs.protobuf.activities.ActivityDefinitionInfo;
 import org.yamcs.protobuf.activities.ActivityInfo;
 import org.yamcs.protobuf.activities.ActivityTriggersApiClient;
+import org.yamcs.protobuf.activities.AlarmCondition;
+import org.yamcs.protobuf.activities.AlarmCondition.AlarmType;
 import org.yamcs.protobuf.activities.ConfirmTriggerFiringRequest;
+import org.yamcs.protobuf.activities.CreateTriggerRequest;
+import org.yamcs.protobuf.activities.DeleteTriggerRequest;
 import org.yamcs.protobuf.activities.DisableAllTriggersRequest;
-import org.yamcs.protobuf.activities.DisableTriggerRequest;
 import org.yamcs.protobuf.activities.EnableAllTriggersRequest;
-import org.yamcs.protobuf.activities.EnableTriggerRequest;
 import org.yamcs.protobuf.activities.GetActivityRequest;
 import org.yamcs.protobuf.activities.ListTriggerFiringsRequest;
 import org.yamcs.protobuf.activities.ListTriggerFiringsResponse;
 import org.yamcs.protobuf.activities.ListTriggersRequest;
 import org.yamcs.protobuf.activities.ListTriggersResponse;
+import org.yamcs.protobuf.activities.ParameterCondition;
+import org.yamcs.protobuf.activities.TestTriggerRequest;
+import org.yamcs.protobuf.activities.TestTriggerResponse;
 import org.yamcs.protobuf.activities.TriggerFiringInfo;
 import org.yamcs.protobuf.activities.TriggerFiringOutcome;
 import org.yamcs.protobuf.activities.TriggerInfo;
+import org.yamcs.protobuf.activities.TriggerPolicy;
+import org.yamcs.protobuf.activities.TriggerPolicy.Concurrency;
 import org.yamcs.protobuf.activities.TriggerServiceStatus;
 import org.yamcs.utils.ValueHelper;
+
+import com.google.protobuf.Empty;
 
 public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
 
@@ -53,38 +66,29 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
         processorClient = yamcsClient.createProcessorClient(yamcsInstance, "realtime");
     }
 
-    /**
-     * The triggers are declared in the instance configuration, all disabled. Each test enables the one it needs.
-     */
     @AfterEach
     public void cleanup() throws Exception {
         ListTriggersResponse response = call((r, o) -> triggerClient.listTriggers(null,
                 ListTriggersRequest.newBuilder().setInstance(yamcsInstance).build(), o));
         for (var trigger : response.getTriggersList()) {
-            if (trigger.getEnabled()) {
-                this.<TriggerInfo> call((r, o) -> triggerClient.disableTrigger(null, DisableTriggerRequest.newBuilder()
-                        .setInstance(yamcsInstance)
-                        .setTrigger(trigger.getId())
-                        .build(), o));
-            }
+            this.<Empty> call((r, o) -> triggerClient.deleteTrigger(null, DeleteTriggerRequest.newBuilder()
+                    .setInstance(yamcsInstance)
+                    .setTrigger(trigger.getId())
+                    .build(), o));
         }
     }
 
     @Test
-    public void testListConfigTriggers() throws Exception {
-        ListTriggersResponse response = call((r, o) -> triggerClient.listTriggers(null,
-                ListTriggersRequest.newBuilder().setInstance(yamcsInstance).build(), o));
-        var trigger = response.getTriggersList().stream()
-                .filter(t -> t.getName().equals("parameter-trigger"))
-                .findFirst().orElseThrow();
-        assertFalse(trigger.getEnabled());
-        assertEquals("/REFMDB/SUBSYS1/LocalPara1 > 10", trigger.getParameterCondition().getExpression());
-        assertEquals("MANUAL", trigger.getActivity().getType());
-    }
-
-    @Test
     public void testEventAlarmTrigger() throws Exception {
-        var trigger = enableTrigger("event-trigger");
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("event-trigger")
+                .setAlarmCondition(AlarmCondition.newBuilder()
+                        .setAlarmType(AlarmType.EVENT)
+                        .addSubjects(EVENT_SOURCE + "/Trigger-Test-1*"))
+                .setPolicy(TriggerPolicy.newBuilder().setCooldown(0).setConcurrency(Concurrency.ALLOW))
+                .setActivity(manualActivity("Handle ${event.message} (${alarm.severity})"))
+                .build());
+        assertEquals("admin", trigger.getOwner());
 
         createEvent("Trigger-Test-1a", "warning", "battery low");
         var firings = waitForFirings(trigger.getName(), 1);
@@ -112,7 +116,15 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     public void testMinSeverityAndConcurrency() throws Exception {
-        var trigger = enableTrigger("severity-trigger");
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("severity-trigger")
+                .setAlarmCondition(AlarmCondition.newBuilder()
+                        .setAlarmType(AlarmType.EVENT)
+                        .addSubjects(EVENT_SOURCE + "/Trigger-Test-2*")
+                        .setMinSeverity(AlarmSeverity.CRITICAL))
+                .setPolicy(TriggerPolicy.newBuilder().setCooldown(0))
+                .setActivity(manualActivity("Stays running"))
+                .build());
 
         createEvent("Trigger-Test-2a", "warning", "not severe enough");
         createEvent("Trigger-Test-2b", "critical", "first");
@@ -128,7 +140,14 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     public void testConfirmation() throws Exception {
-        var trigger = enableTrigger("confirm-trigger");
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("confirm-trigger")
+                .setAlarmCondition(AlarmCondition.newBuilder()
+                        .setAlarmType(AlarmType.EVENT)
+                        .addSubjects(EVENT_SOURCE + "/Trigger-Test-3"))
+                .setPolicy(TriggerPolicy.newBuilder().setRequireConfirmation(true))
+                .setActivity(manualActivity("Confirmed"))
+                .build());
 
         createEvent("Trigger-Test-3", "warning", "please confirm");
         var firing = waitForFirings(trigger.getName(), 1).get(0);
@@ -159,7 +178,13 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     public void testParameterTrigger() throws Exception {
-        var trigger = enableTrigger("parameter-trigger");
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("parameter-trigger")
+                .setParameterCondition(ParameterCondition.newBuilder()
+                        .setExpression("/REFMDB/SUBSYS1/LocalPara1 > 10"))
+                .setPolicy(TriggerPolicy.newBuilder().setCooldown(0).setConcurrency(Concurrency.ALLOW))
+                .setActivity(manualActivity("Value is ${value}"))
+                .build());
 
         setLocalPara1(5); // initial state: false
         setLocalPara1(20); // rising: fire
@@ -178,7 +203,14 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     public void testKillSwitch() throws Exception {
-        var trigger = enableTrigger("killswitch-trigger");
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("killswitch-trigger")
+                .setAlarmCondition(AlarmCondition.newBuilder()
+                        .setAlarmType(AlarmType.EVENT)
+                        .addSubjects(EVENT_SOURCE + "/Trigger-Test-5*"))
+                .setPolicy(TriggerPolicy.newBuilder().setCooldown(0).setConcurrency(Concurrency.ALLOW))
+                .setActivity(manualActivity("x"))
+                .build());
 
         TriggerServiceStatus status = call((r, o) -> triggerClient.disableAllTriggers(null,
                 DisableAllTriggersRequest.newBuilder().setInstance(yamcsInstance).build(), o));
@@ -197,11 +229,50 @@ public class ActivityTriggerIntegrationTest extends AbstractIntegrationTest {
         waitForFirings(trigger.getName(), 1);
     }
 
-    private TriggerInfo enableTrigger(String name) throws Exception {
-        return call((r, o) -> triggerClient.enableTrigger(null, EnableTriggerRequest.newBuilder()
+    @Test
+    public void testValidation() throws Exception {
+        try {
+            createTrigger(TriggerInfo.newBuilder()
+                    .setName("invalid")
+                    .setParameterCondition(ParameterCondition.newBuilder()
+                            .setExpression("/REFMDB/SUBSYS1/NoSuchParameter > 10"))
+                    .setActivity(manualActivity("x"))
+                    .build());
+            fail("Expected an exception");
+        } catch (ExecutionException e) {
+            assertTrue(e.getCause().getMessage().contains("NoSuchParameter"), e.getCause().getMessage());
+        }
+
+        var trigger = createTrigger(TriggerInfo.newBuilder()
+                .setName("test-trigger")
+                .setAlarmCondition(AlarmCondition.newBuilder().setAlarmType(AlarmType.PARAMETER))
+                .setActivity(ActivityDefinitionInfo.newBuilder()
+                        .setType("MANUAL")
+                        .setArgs(WellKnownTypes.toStruct(Map.of("name", "${alarm.subject} ${foo}")))
+                        .build())
+                .build());
+
+        TestTriggerResponse response = call((r, o) -> triggerClient.testTrigger(null, TestTriggerRequest.newBuilder()
                 .setInstance(yamcsInstance)
-                .setTrigger(name)
+                .setTrigger(trigger.getName())
+                .setContext(WellKnownTypes.toStruct(Map.of("alarm.subject", "/a/b")))
                 .build(), o));
+        assertTrue(response.hasError());
+        assertTrue(response.getError().contains("foo"), response.getError());
+    }
+
+    private TriggerInfo createTrigger(TriggerInfo trigger) throws Exception {
+        return call((r, o) -> triggerClient.createTrigger(null, CreateTriggerRequest.newBuilder()
+                .setInstance(yamcsInstance)
+                .setTrigger(trigger)
+                .build(), o));
+    }
+
+    private static ActivityDefinitionInfo manualActivity(String name) {
+        return ActivityDefinitionInfo.newBuilder()
+                .setType("MANUAL")
+                .setArgs(WellKnownTypes.toStruct(Map.of("name", name)))
+                .build();
     }
 
     private void createEvent(String type, String severity, String message) throws Exception {

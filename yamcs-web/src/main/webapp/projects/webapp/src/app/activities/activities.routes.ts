@@ -7,6 +7,7 @@ import { ActivityLogTabComponent } from './activity-log-tab/activity-log-tab.com
 import { ActivityComponent } from './activity/activity.component';
 import { FiringListComponent } from './triggers/firing-list/firing-list.component';
 import { mayReadTriggersGuardFn } from './triggers/shared/triggers';
+import { TriggerEditComponent } from './triggers/trigger-edit/trigger-edit.component';
 import { TriggerListComponent } from './triggers/trigger-list/trigger-list.component';
 
 export const ROUTES: Routes = [
@@ -24,7 +25,21 @@ export const ROUTES: Routes = [
       {
         path: 'triggers',
         canActivate: [mayReadTriggersGuardFn],
-        component: TriggerListComponent,
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            component: TriggerListComponent,
+          },
+          {
+            path: 'create',
+            component: TriggerEditComponent,
+          },
+          {
+            path: ':trigger',
+            component: TriggerEditComponent,
+          },
+        ],
       },
       {
         path: 'trigger-firings',

@@ -1,5 +1,6 @@
 package org.yamcs.activities.triggers;
 
+import java.text.ParseException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -40,10 +41,12 @@ import org.yamcs.events.EventProducerFactory;
 import org.yamcs.mdb.MdbFactory;
 import org.yamcs.memento.MementoDb;
 import org.yamcs.parameter.Value;
+import org.yamcs.protobuf.activities.ActivityDefinitionInfo;
 import org.yamcs.protobuf.activities.ActivityOrigin;
 import org.yamcs.protobuf.activities.TriggerFiringOutcome;
 import org.yamcs.protobuf.activities.TriggerInfo;
 import org.yamcs.protobuf.activities.TriggerPolicy.Concurrency;
+import org.yamcs.protobuf.activities.TriggerSource;
 import org.yamcs.security.SystemPrivilege;
 import org.yamcs.security.User;
 import org.yamcs.utils.StringConverter;
@@ -53,8 +56,8 @@ import org.yamcs.utils.ValueUtility;
 /**
  * Starts activities automatically when an alarm occurs, or when a condition on parameters becomes true.
  * <p>
- * Triggers are declared in the service configuration. All trigger logic runs on a single thread owned by this
- * service. Alarm and parameter callbacks only hand over work to that thread.
+ * Triggers are created through the API, or declared in the service configuration. All trigger logic runs on a
+ * single thread owned by this service. Alarm and parameter callbacks only hand over work to that thread.
  */
 public class TriggerService extends AbstractYamcsService implements ActivityListener, ProcessorListener {
 
@@ -108,16 +111,12 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
         defaultEnabled = config.getBoolean("enabled");
         firingRetentionDays = config.getInt("firingRetention");
 
-        activityService = YamcsServer.getServer().getInstance(yamcsInstance).getActivityService();
-        var mdb = MdbFactory.getInstance(yamcsInstance);
-
         var names = new HashSet<String>();
         if (config.containsKey("triggers")) {
             for (var triggerConfig : config.getConfigList("triggers")) {
                 try {
                     var trigger = TriggerDefinitions.fromConfig(triggerConfig);
-                    var errors = new ArrayList<>(TriggerDefinitions.validate(trigger));
-                    errors.addAll(TriggerDefinitions.validateReferences(trigger, mdb, this::isKnownActivityType));
+                    var errors = TriggerDefinitions.validate(trigger);
                     if (!errors.isEmpty()) {
                         throw new InitException("Invalid trigger '" + trigger.getName() + "': "
                                 + String.join(", ", errors));
@@ -125,40 +124,16 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
                     if (!names.add(trigger.getName())) {
                         throw new InitException("Duplicate trigger name '" + trigger.getName() + "'");
                     }
-                    configTriggers.add(withActivityDescription(trigger));
+                    configTriggers.add(trigger);
                 } catch (ValidationException e) {
                     throw new InitException(e.getMessage(), e);
                 }
             }
         }
 
+        activityService = YamcsServer.getServer().getInstance(yamcsInstance).getActivityService();
         triggerDb = new TriggerDb(yamcsInstance);
         eventProducer = EventProducerFactory.getEventProducer(yamcsInstance, EVENT_SOURCE, 10000);
-    }
-
-    /**
-     * Adds the executor's description of the activity, for display. The arguments may still contain placeholders.
-     */
-    private TriggerInfo withActivityDescription(TriggerInfo trigger) {
-        var executor = activityService.getExecutor(trigger.getActivity().getType());
-        if (executor == null) {
-            return trigger;
-        }
-        try {
-            var description = executor.describeActivity(TriggerDefinitions.getActivityArgs(trigger));
-            if (description != null) {
-                var b = trigger.toBuilder();
-                b.getActivityBuilder().setDescription(description);
-                return b.build();
-            }
-        } catch (RuntimeException e) {
-            log.debug("Cannot describe activity of trigger '{}'", trigger.getName(), e);
-        }
-        return trigger;
-    }
-
-    private boolean isKnownActivityType(String type) {
-        return ActivityService.ACTIVITY_TYPE_MANUAL.equals(type) || activityService.getExecutor(type) != null;
     }
 
     @Override
@@ -205,7 +180,17 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
     }
 
     private void loadTriggers() {
+        var configNames = configTriggers.stream().map(TriggerInfo::getName).collect(Collectors.toSet());
         for (var trigger : configTriggers) {
+            var state = new TriggerState(trigger);
+            triggers.put(state.id, state);
+        }
+        for (var trigger : triggerDb.listTriggers()) {
+            if (configNames.contains(trigger.getName())) {
+                log.warn("Ignoring stored trigger '{}', because a trigger with the same name "
+                        + "is defined in the configuration", trigger.getName());
+                continue;
+            }
             var state = new TriggerState(trigger);
             triggers.put(state.id, state);
         }
@@ -444,10 +429,10 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
 
     private User resolveRunAsUser(TriggerInfo definition) {
         var securityStore = YamcsServer.getServer().getSecurityStore();
-        if (!definition.hasRunAs()) {
+        String username = definition.hasRunAs() ? definition.getRunAs() : definition.getOwner();
+        if (username == null || username.isEmpty()) {
             return securityStore.getSystemUser();
         }
-        var username = definition.getRunAs();
         if (username.equals(securityStore.getGuestUser().getName())) {
             return securityStore.getGuestUser(); // Security disabled
         }
@@ -544,7 +529,70 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
     }
 
     /**
-     * Enable or disable a trigger. The change lasts until the next restart.
+     * Creates a new trigger.
+     *
+     * @throws IllegalArgumentException
+     *             if the definition is invalid
+     */
+    public TriggerInfo createTrigger(TriggerInfo definition, User user) {
+        return callSync(() -> {
+            var trigger = prepareDefinition(definition.toBuilder()
+                    .setId(UUID.randomUUID().toString()), user, null);
+            triggerDb.saveTrigger(trigger);
+            var state = new TriggerState(trigger);
+            triggers.put(state.id, state);
+            refreshMonitor(state);
+            log.info("Trigger '{}' created by {}", trigger.getName(), user.getName());
+            return state.toInfo();
+        });
+    }
+
+    /**
+     * Replaces the definition of an existing trigger.
+     *
+     * @return the updated trigger, or null if not found
+     * @throws IllegalArgumentException
+     *             if the definition is invalid, or the trigger is read-only
+     */
+    public TriggerInfo updateTrigger(String id, TriggerInfo definition, User user) {
+        return callSync(() -> {
+            var state = findState(id);
+            if (state == null) {
+                return null;
+            }
+            verifyModifiable(state);
+            var trigger = prepareDefinition(definition.toBuilder()
+                    .setId(state.id.toString()), user, state);
+            triggerDb.saveTrigger(trigger);
+            state.stopMonitor();
+            state.definition = trigger;
+            refreshMonitor(state);
+            log.info("Trigger '{}' updated by {}", trigger.getName(), user.getName());
+            return state.toInfo();
+        });
+    }
+
+    /**
+     * @return true if the trigger was deleted, false if not found
+     */
+    public boolean deleteTrigger(String idOrName, User user) {
+        return callSync(() -> {
+            var state = findState(idOrName);
+            if (state == null) {
+                return false;
+            }
+            verifyModifiable(state);
+            state.stopMonitor();
+            triggers.remove(state.id);
+            triggerDb.deleteTrigger(state.id);
+            log.info("Trigger '{}' deleted by {}", state.definition.getName(), user.getName());
+            return true;
+        });
+    }
+
+    /**
+     * Enable or disable a trigger. For triggers defined in the configuration, the change lasts until the next
+     * restart.
      *
      * @return the updated trigger, or null if not found
      */
@@ -555,6 +603,9 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
                 return null;
             }
             state.definition = state.definition.toBuilder().setEnabled(enabled).build();
+            if (state.definition.getSource() == TriggerSource.DATABASE) {
+                triggerDb.saveTrigger(state.definition);
+            }
             refreshMonitor(state);
             log.info("Trigger '{}' {} by {}", state.definition.getName(), enabled ? "enabled" : "disabled",
                     user.getName());
@@ -587,6 +638,50 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
 
     public int getPendingConfirmationCount() {
         return pendingFirings.size();
+    }
+
+    /**
+     * Resolves the activity of a trigger against a sample context, and validates the result, without starting
+     * anything.
+     *
+     * @return the resolved activity, or null if the trigger is not found
+     * @throws IllegalArgumentException
+     *             if the activity cannot be resolved or is invalid
+     */
+    public ActivityDefinitionInfo testTrigger(String idOrName, Map<String, Object> sampleContext) {
+        return callSync(() -> {
+            var state = findState(idOrName);
+            if (state == null) {
+                return null;
+            }
+            var definition = state.definition;
+            var context = new LinkedHashMap<String, Object>();
+            context.put("trigger.id", state.id.toString());
+            context.put("trigger.name", definition.getName());
+            context.put("processor", definition.getProcessor());
+            if (sampleContext != null) {
+                context.putAll(sampleContext);
+            }
+
+            var args = resolveArgs(definition, context);
+            var type = definition.getActivity().getType();
+            var executor = activityService.getExecutor(type);
+            var b = ActivityDefinitionInfo.newBuilder()
+                    .setType(type)
+                    .setArgs(org.yamcs.client.utils.WellKnownTypes.toStruct(args));
+            if (definition.getActivity().hasLabel()) {
+                b.setLabel(definition.getActivity().getLabel());
+            }
+            if (executor != null) {
+                try {
+                    executor.getActivitySpec().validate(args);
+                } catch (ValidationException e) {
+                    throw new IllegalArgumentException(e.getMessage(), e);
+                }
+                b.setDescription(executor.describeActivity(args));
+            }
+            return b.build();
+        });
     }
 
     public List<TriggerFiring> listFirings(String triggerIdOrName, Collection<TriggerFiringOutcome> outcomes,
@@ -674,6 +769,58 @@ public class TriggerService extends AbstractYamcsService implements ActivityList
             }
         }
         return null;
+    }
+
+    private void verifyModifiable(TriggerState state) {
+        if (state.definition.getSource() == TriggerSource.CONFIG) {
+            throw new IllegalArgumentException("Trigger '" + state.definition.getName()
+                    + "' is defined in the configuration and cannot be modified");
+        }
+    }
+
+    /**
+     * Applies defaults, fills server-controlled fields, and validates a definition received through the API.
+     */
+    private TriggerInfo prepareDefinition(TriggerInfo.Builder b, User user, TriggerState existing) {
+        b.setSource(TriggerSource.DATABASE)
+                .setOwner(user.getName())
+                .clearLastFired()
+                .clearFiringCount();
+        if (b.hasRunAs() && b.getRunAs().isEmpty()) {
+            b.clearRunAs();
+        }
+        if (b.hasRunAs() && !b.getRunAs().equals(user.getName()) && !user.isSuperuser()) {
+            throw new IllegalArgumentException("Only superusers may set runAs to another user");
+        }
+        if (b.hasActivity()) {
+            b.getActivityBuilder().clearDescription();
+        }
+        var trigger = TriggerDefinitions.withDefaults(b.build());
+
+        var errors = new ArrayList<>(TriggerDefinitions.validate(trigger));
+        for (var state : triggers.values()) {
+            if (state != existing && state.definition.getName().equals(trigger.getName())) {
+                errors.add("A trigger named '" + trigger.getName() + "' already exists");
+            }
+        }
+        if (trigger.hasActivity() && trigger.getActivity().hasType()) {
+            var type = trigger.getActivity().getType();
+            if (!ActivityService.ACTIVITY_TYPE_MANUAL.equals(type) && activityService.getExecutor(type) == null) {
+                errors.add("Unknown activity type '" + type + "'");
+            }
+        }
+        if (trigger.hasParameterCondition() && trigger.getParameterCondition().hasExpression()) {
+            try {
+                var mdb = MdbFactory.getInstance(yamcsInstance);
+                new ConditionExpressionParser(mdb).parse(trigger.getParameterCondition().getExpression());
+            } catch (ParseException e) {
+                errors.add("Invalid expression: " + e.getMessage());
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", errors));
+        }
+        return trigger;
     }
 
     private <T> T callSync(Callable<T> callable) {
