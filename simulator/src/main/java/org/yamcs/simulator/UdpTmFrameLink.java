@@ -343,7 +343,9 @@ public class UdpTmFrameLink extends AbstractScheduledService {
         void encodeHeaderAndTrailer() {
             // set the frame sequence count
             ByteArrayUtils.encodeUnsigned3Bytes((int) vcSeqCount, data, 2);
-            data[5] = (byte) (0x60 + ((vcSeqCount >>> 24) & 0xF));
+            // Signaling field: replay flag 0, VC frame count cycle use flag 1, spacecraft id MSB 00
+            // (the simulator spacecraft id is 8 bits), VC frame count cycle
+            data[5] = (byte) (0x40 + ((vcSeqCount >>> 24) & 0xF));
 
             ByteArrayUtils.encodeInt(clcw, data, data.length - 6);
 
