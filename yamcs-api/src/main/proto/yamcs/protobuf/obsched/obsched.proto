@@ -1,0 +1,228 @@
+syntax="proto2";
+
+package yamcs.protobuf.obsched;
+
+option java_package = "org.yamcs.protobuf.obsched";
+option java_outer_classname = "OnboardSchedulerProto";
+option java_multiple_files = true;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// What the ground wants for an entry
+enum EntryIntent {
+  // The entry has to be on board
+  PLANNED = 1;
+
+  // The entry has been deleted on the ground. It is waiting for a sync
+  // to be removed from the on-board schedule.
+  DELETE_PENDING = 2;
+
+  // The entry is deleted (on the ground and, if it was ever uploaded, on board)
+  DELETED = 3;
+}
+
+// What is known about the on-board copy of an entry
+enum EntryState {
+  // Not in the on-board schedule
+  NOT_ONBOARD = 1;
+
+  // Upload command sent, not yet confirmed
+  UPLOAD_PENDING = 2;
+
+  // In the on-board schedule, waiting for its release time
+  ONBOARD = 3;
+
+  // Released from the on-board schedule
+  RELEASED = 4;
+
+  // Execution started on board
+  STARTED = 5;
+
+  // Execution completed successfully on board
+  COMPLETED = 6;
+
+  // Failed on board (release, start or completion failure)
+  FAILED = 7;
+
+  // Never got on board before its release time
+  MISSED = 8;
+
+  // On board but not released (e.g. disabled sub-schedule)
+  SKIPPED = 9;
+
+  // Should have been released, but there is no evidence of what happened
+  UNKNOWN = 10;
+}
+
+enum EvidenceSource {
+  // A ground action (create, edit, upload command sent, ...)
+  GROUND = 1;
+
+  // Telemetry received in realtime
+  REALTIME = 2;
+
+  // Telemetry recorded on board and dumped
+  DUMP = 3;
+
+  // Read-back of the on-board schedule
+  READBACK = 4;
+}
+
+message EvidenceInfo {
+  // When the evidence was produced (on-board generation time for TM)
+  optional google.protobuf.Timestamp time = 1;
+
+  // When the evidence was received by Yamcs
+  optional google.protobuf.Timestamp receptionTime = 2;
+
+  optional EvidenceSource source = 3;
+
+  // State implied by this evidence (unset for evidence that does not change the state)
+  optional EntryState state = 4;
+
+  optional string message = 5;
+}
+
+message UploadInfo {
+  // Command history identifier of the upload command
+  optional string commandId = 1;
+
+  // On-board reference of the uploaded copy (adapter specific)
+  optional string ref = 2;
+
+  // When the upload was sent
+  optional google.protobuf.Timestamp time = 3;
+
+  // Entry revision that was uploaded
+  optional int32 revision = 4;
+}
+
+message ScheduleEntryInfo {
+  // Entry identifier
+  optional string id = 1;
+
+  // Name of the scheduler that owns this entry
+  optional string scheduler = 2;
+
+  // Qualified name of the command
+  optional string command = 3;
+
+  // Command arguments
+  optional google.protobuf.Struct args = 4;
+
+  // Release time
+  optional google.protobuf.Timestamp releaseTime = 5;
+
+  // Adapter-specific options (for example PUS sub-schedule and group)
+  optional google.protobuf.Struct options = 6;
+
+  optional string description = 7;
+  repeated string tags = 8;
+
+  // Incremented on each edit
+  optional int32 revision = 9;
+
+  // Revision of the on-board copy, if any
+  optional int32 uploadedRevision = 10;
+
+  optional EntryIntent intent = 11;
+  optional EntryState state = 12;
+
+  // On-board reference of the current copy
+  optional string ref = 13;
+
+  // Detail of the last state change, e.g. a failure reason
+  optional string stateMessage = 14;
+
+  optional google.protobuf.Timestamp created = 15;
+  optional string createdBy = 16;
+  optional google.protobuf.Timestamp modified = 17;
+  optional string modifiedBy = 18;
+
+  repeated UploadInfo uploads = 19;
+  repeated EvidenceInfo evidence = 20;
+}
+
+message SchedulerCapabilitiesInfo {
+  // The on-board schedule can be read back
+  optional bool readBack = 1;
+
+  // Single entries can be inserted and deleted on board
+  optional bool entryLevelEdit = 2;
+
+  // States the adapter can observe
+  repeated EntryState observableStates = 3;
+
+  // Minimum time between a sync and the release time of an entry, in milliseconds
+  optional int64 minLeadTime = 4;
+}
+
+message SchedulerInfo {
+  // Scheduler name
+  optional string name = 1;
+
+  // Adapter type (e.g. pus11)
+  optional string adapter = 2;
+
+  // Processor used for commanding
+  optional string processor = 3;
+
+  optional SchedulerCapabilitiesInfo capabilities = 4;
+
+  // Latest sync (if any)
+  optional SyncInfo lastSync = 5;
+
+  // Names of the adapter-specific entry options
+  repeated EntryOptionInfo entryOptions = 6;
+}
+
+message EntryOptionInfo {
+  optional string name = 1;
+  optional string type = 2;
+  optional string description = 3;
+
+  // Value applied on board when the entry does not set the option
+  optional google.protobuf.Value defaultValue = 4;
+
+  // Whether the option partitions the schedule (sub-schedules, groups, sequencers...)
+  // in a way worth filtering on
+  optional bool filterable = 5;
+}
+
+enum SyncStatus {
+  SYNC_RUNNING = 1;
+  SYNC_SUCCEEDED = 2;
+  SYNC_FAILED = 3;
+}
+
+message SyncStepInfo {
+  optional string description = 1;
+
+  // Entries affected by this step
+  repeated string entryIds = 2;
+
+  // Set once the step has been executed
+  optional bool done = 3;
+  optional string error = 4;
+}
+
+// An item found on board that does not correspond to any ground entry
+message ForeignItemInfo {
+  optional string ref = 1;
+  optional google.protobuf.Timestamp releaseTime = 2;
+  optional string description = 3;
+}
+
+message SyncInfo {
+  optional string id = 1;
+  optional SyncStatus status = 2;
+  optional bool dryRun = 3;
+  optional google.protobuf.Timestamp start = 4;
+  optional google.protobuf.Timestamp stop = 5;
+  optional string user = 6;
+  repeated SyncStepInfo steps = 7;
+  repeated ForeignItemInfo foreignItems = 8;
+  repeated string warnings = 9;
+  optional string failureReason = 10;
+}

@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SpaceSystem name="PUS15" xmlns="http://www.omg.org/spec/XTCE/20180204" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.omg.org/spec/XTCE/20180204 https://www.omg.org/spec/XTCE/20180204/SpaceSystem.xsd">
+	<Header validationStatus="Unknown" version="1.0" date="2026-11-27T00:00:00Z">
+		<NoteSet>
+			<Note>Minimal PUS ST[15] on-board storage and retrieval, as implemented by the simulator (Pus15Service).
+				There is a single packet store (ID 1) filled with the TM generated during LOS. The stored packets are
+				downlinked on the dump link (stream tm_dump), automatically after AOS or following a TC[15,9].
+				All the commands below address exactly one packet store (N is fixed to 1).</Note>
+		</NoteSet>
+	</Header>
+	<TelemetryMetaData>
+		<ParameterTypeSet>
+			<EnumeratedParameterType name="LinkStateType">
+				<IntegerDataEncoding sizeInBits="8" />
+				<EnumerationList>
+					<Enumeration value="0" label="AOS" />
+					<Enumeration value="1" label="LOS" />
+				</EnumerationList>
+			</EnumeratedParameterType>
+			<EnumeratedParameterType name="EnabledType">
+				<IntegerDataEncoding sizeInBits="8" />
+				<EnumerationList>
+					<Enumeration value="0" label="disabled" />
+					<Enumeration value="1" label="enabled" />
+				</EnumerationList>
+			</EnumeratedParameterType>
+			<IntegerParameterType name="PercentType" signed="false">
+				<UnitSet>
+					<Unit>%</Unit>
+				</UnitSet>
+				<IntegerDataEncoding sizeInBits="8" />
+			</IntegerParameterType>
+		</ParameterTypeSet>
+		<ParameterSet>
+			<!-- HK hkid 6 -->
+			<Parameter parameterTypeRef="LinkStateType" name="link_state"
+				shortDescription="On-board view of the link: LOS or AOS. In realtime it is always AOS, the LOS values are only seen in the dump" />
+			<Parameter parameterTypeRef="EnabledType" name="storage_function" shortDescription="Status of the storage function of packet store 1" />
+			<Parameter parameterTypeRef="/dt/uint32" name="stored_packets" shortDescription="Number of packets in packet store 1" />
+			<Parameter parameterTypeRef="PercentType" name="fill_percentage" shortDescription="Packet store 1 fill percentage" />
+
+			<!-- TM[15,13] -->
+			<Parameter parameterTypeRef="/dt/uint8" name="summary_n" />
+			<Parameter parameterTypeRef="/dt/uint8" name="summary_packet_store_id" />
+			<Parameter parameterTypeRef="/PUS/PusTimeType" name="summary_oldest_packet_time"
+				shortDescription="Storage time of the oldest packet (the epoch if the packet store is empty)" />
+			<Parameter parameterTypeRef="/PUS/PusTimeType" name="summary_newest_packet_time"
+				shortDescription="Storage time of the newest packet (the epoch if the packet store is empty)" />
+			<Parameter parameterTypeRef="PercentType" name="summary_fill_percentage" />
+			<Parameter parameterTypeRef="/dt/uint32" name="summary_packet_count"
+				shortDescription="Number of stored packets (not part of the ECSS report)" />
+		</ParameterSet>
+		<ContainerSet>
+			<SequenceContainer name="StorageStatus" shortDescription="HK (hkid 6) LOS and on-board storage status">
+				<AncillaryDataSet>
+					<AncillaryData name="Yamcs" mimeType="text/plain">UseAsPacketName</AncillaryData>
+				</AncillaryDataSet>
+				<EntryList>
+					<ParameterRefEntry parameterRef="link_state" />
+					<ParameterRefEntry parameterRef="storage_function" />
+					<ParameterRefEntry parameterRef="stored_packets" />
+					<ParameterRefEntry parameterRef="fill_percentage" />
+				</EntryList>
+				<BaseContainer containerRef="/PUS/hk25">
+					<RestrictionCriteria>
+						<ComparisonList>
+							<Comparison parameterRef="/PUS/hkid" value="6" />
+						</ComparisonList>
+					</RestrictionCriteria>
+				</BaseContainer>
+			</SequenceContainer>
+
+			<SequenceContainer name="pus15-tm">
+				<EntryList />
+				<BaseContainer containerRef="/PUS/pus-tm">
+					<RestrictionCriteria>
+						<Comparison parameterRef="/PUS/type" comparisonOperator="==" value="15" />
+					</RestrictionCriteria>
+				</BaseContainer>
+			</SequenceContainer>
+
+			<SequenceContainer name="PACKET_STORE_SUMMARY_REPORT" shortDescription="TM[15,13] packet store content summary report">
+				<EntryList>
+					<ParameterRefEntry parameterRef="summary_n" />
+					<ParameterRefEntry parameterRef="summary_packet_store_id" />
+					<ParameterRefEntry parameterRef="summary_oldest_packet_time" />
+					<ParameterRefEntry parameterRef="summary_newest_packet_time" />
+					<ParameterRefEntry parameterRef="summary_fill_percentage" />
+					<ParameterRefEntry parameterRef="summary_packet_count" />
+				</EntryList>
+				<BaseContainer containerRef="pus15-tm">
+					<RestrictionCriteria>
+						<Comparison parameterRef="/PUS/subtype" comparisonOperator="==" value="13" />
+					</RestrictionCriteria>
+				</BaseContainer>
+			</SequenceContainer>
+		</ContainerSet>
+	</TelemetryMetaData>
+	<CommandMetaData>
+		<ArgumentTypeSet>
+			<IntegerArgumentType name="PacketStoreIdType" baseType="/dt/uint8">
+				<ValidRangeSet>
+					<ValidRange minInclusive="1" maxInclusive="255" />
+				</ValidRangeSet>
+			</IntegerArgumentType>
+		</ArgumentTypeSet>
+		<MetaCommandSet>
+			<MetaCommand name="pus15-tc" abstract="true">
+				<BaseMetaCommand metaCommandRef="/PUS/pus-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="apid" argumentValue="1" />
+						<ArgumentAssignment argumentName="type" argumentValue="15" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<CommandContainer name="pus15-tc">
+					<EntryList />
+				</CommandContainer>
+			</MetaCommand>
+
+			<MetaCommand name="ENABLE_STORAGE" shortDescription="TC[15,1] enable the storage function of a packet store">
+				<BaseMetaCommand metaCommandRef="pus15-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="subtype" argumentValue="1" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<ArgumentList>
+					<Argument argumentTypeRef="PacketStoreIdType" name="packet_store_id" initialValue="1" />
+				</ArgumentList>
+				<CommandContainer name="ENABLE_STORAGE">
+					<EntryList>
+						<FixedValueEntry name="N" binaryValue="01" sizeInBits="8" />
+						<ArgumentRefEntry argumentRef="packet_store_id" />
+					</EntryList>
+					<BaseContainer containerRef="pus15-tc" />
+				</CommandContainer>
+			</MetaCommand>
+
+			<MetaCommand name="DISABLE_STORAGE" shortDescription="TC[15,2] disable the storage function of a packet store">
+				<BaseMetaCommand metaCommandRef="pus15-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="subtype" argumentValue="2" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<ArgumentList>
+					<Argument argumentTypeRef="PacketStoreIdType" name="packet_store_id" initialValue="1" />
+				</ArgumentList>
+				<CommandContainer name="DISABLE_STORAGE">
+					<EntryList>
+						<FixedValueEntry name="N" binaryValue="01" sizeInBits="8" />
+						<ArgumentRefEntry argumentRef="packet_store_id" />
+					</EntryList>
+					<BaseContainer containerRef="pus15-tc" />
+				</CommandContainer>
+			</MetaCommand>
+
+			<MetaCommand name="START_BY_TIME_RANGE_RETRIEVAL" shortDescription="TC[15,9] downlink on the dump link the packets stored in a time range">
+				<LongDescription>The packets with the storage time in [start_time, end_time] are sent in storage order on the dump link (stream tm_dump). The command is completed when all of them have been sent. It is rejected if the dump link is not connected.</LongDescription>
+				<BaseMetaCommand metaCommandRef="pus15-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="subtype" argumentValue="9" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<ArgumentList>
+					<Argument argumentTypeRef="PacketStoreIdType" name="packet_store_id" initialValue="1" />
+					<Argument argumentTypeRef="/PUS/PusTimeType" name="start_time" />
+					<Argument argumentTypeRef="/PUS/PusTimeType" name="end_time" />
+				</ArgumentList>
+				<CommandContainer name="START_BY_TIME_RANGE_RETRIEVAL">
+					<EntryList>
+						<ArgumentRefEntry argumentRef="packet_store_id" />
+						<ArgumentRefEntry argumentRef="start_time" />
+						<ArgumentRefEntry argumentRef="end_time" />
+					</EntryList>
+					<BaseContainer containerRef="pus15-tc" />
+				</CommandContainer>
+			</MetaCommand>
+
+			<MetaCommand name="DELETE_CONTENT_UP_TO" shortDescription="TC[15,11] delete the packet store content up to the specified time">
+				<BaseMetaCommand metaCommandRef="pus15-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="subtype" argumentValue="11" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<ArgumentList>
+					<Argument argumentTypeRef="/PUS/PusTimeType" name="end_time" />
+					<Argument argumentTypeRef="PacketStoreIdType" name="packet_store_id" initialValue="1" />
+				</ArgumentList>
+				<CommandContainer name="DELETE_CONTENT_UP_TO">
+					<EntryList>
+						<ArgumentRefEntry argumentRef="end_time" />
+						<FixedValueEntry name="N" binaryValue="01" sizeInBits="8" />
+						<ArgumentRefEntry argumentRef="packet_store_id" />
+					</EntryList>
+					<BaseContainer containerRef="pus15-tc" />
+				</CommandContainer>
+			</MetaCommand>
+
+			<MetaCommand name="REPORT_PACKET_STORE_SUMMARY" shortDescription="TC[15,12] summary-report the packet store content">
+				<BaseMetaCommand metaCommandRef="pus15-tc">
+					<ArgumentAssignmentList>
+						<ArgumentAssignment argumentName="subtype" argumentValue="12" />
+					</ArgumentAssignmentList>
+				</BaseMetaCommand>
+				<ArgumentList>
+					<Argument argumentTypeRef="PacketStoreIdType" name="packet_store_id" initialValue="1" />
+				</ArgumentList>
+				<CommandContainer name="REPORT_PACKET_STORE_SUMMARY">
+					<EntryList>
+						<FixedValueEntry name="N" binaryValue="01" sizeInBits="8" />
+						<ArgumentRefEntry argumentRef="packet_store_id" />
+					</EntryList>
+					<BaseContainer containerRef="pus15-tc" />
+				</CommandContainer>
+				<VerifierSet>
+					<ExecutionVerifier name="PUS15_Report">
+						<ContainerRef containerRef="PACKET_STORE_SUMMARY_REPORT" />
+						<CheckWindow timeToStopChecking="PT15S" timeWindowIsRelativeTo="commandRelease" />
+					</ExecutionVerifier>
+				</VerifierSet>
+			</MetaCommand>
+		</MetaCommandSet>
+	</CommandMetaData>
+</SpaceSystem>

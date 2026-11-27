@@ -170,6 +170,7 @@ public class SecurityStore {
         systemPrivileges.add(SystemPrivilege.ControlCommandClearances);
         systemPrivileges.add(SystemPrivilege.ControlCommandQueue);
         systemPrivileges.add(SystemPrivilege.ControlLinks);
+        systemPrivileges.add(SystemPrivilege.ControlOnboardSchedule);
         systemPrivileges.add(SystemPrivilege.ControlFileTransfers);
         systemPrivileges.add(SystemPrivilege.ControlProcessor);
         systemPrivileges.add(SystemPrivilege.ControlServices);
@@ -186,6 +187,7 @@ public class SecurityStore {
         systemPrivileges.add(SystemPrivilege.ReadFileTransfers);
         systemPrivileges.add(SystemPrivilege.ReadEvents);
         systemPrivileges.add(SystemPrivilege.ReadLinks);
+        systemPrivileges.add(SystemPrivilege.ReadOnboardSchedule);
         systemPrivileges.add(SystemPrivilege.ReadSystemInfo);
         systemPrivileges.add(SystemPrivilege.ReadTables);
         systemPrivileges.add(SystemPrivilege.ReadTimeline);

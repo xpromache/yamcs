@@ -46,6 +46,19 @@ services:
          id: 7
      senderFaultHandlers:
        AckLimitReached: suspend
+  # Ground model of the on-board PUS ST[11] time-based schedule: plan commands at any time,
+  # synchronise them with the on-board schedule at AOS, follow their execution from the
+  # PUS ST[1] reports (realtime and dumped after LOS).
+  - class: org.yamcs.obsched.OnboardSchedulerService
+    name: obsched
+    args:
+      adapter: pus11
+      adapterArgs:
+        realtimeStream: tm_realtime
+        dumpStreams: [tm_dump]
+        # same as the pus11 defaults of the command post-processor
+        defaultSubScheduleId: 1
+        defaultGroupId: 1
   - class: org.yamcs.pus.PusEventDecoder
     args: 
         eventIdParameter: /PUS5/event_id
@@ -58,6 +71,22 @@ dataLinks:
     host: localhost
     port: 10015
     # Give the embedded simulator some time to start up
+    initialDelay: 2000
+    packetPreprocessorClassName: org.yamcs.pus.PusPacketPreprocessor
+    packetPreprocessorArgs:
+        errorDetection:
+           type: CRC-16-CCIIT
+        timeEncoding:
+           type: CUC
+           epoch: UNIX
+
+  # Packets stored on-board during LOS (ST[15] packet store) and downlinked after AOS on the simulator LOS port
+  # (automatically at AOS or following a TC[15,9]). They are archived but not processed by the realtime processor.
+  - name: tm_dump
+    class: org.yamcs.tctm.TcpTmDataLink
+    stream: tm_dump
+    host: localhost
+    port: 10115
     initialDelay: 2000
     packetPreprocessorClassName: org.yamcs.pus.PusPacketPreprocessor
     packetPreprocessorArgs:
@@ -81,6 +110,13 @@ dataLinks:
         timeEncoding:
             implicitPfield: false
             pfield: 0x2f
+        pus11:
+            subScheduleId:
+                bytes: 1
+                default: 1
+            groupId:
+                bytes: 1
+                default: 1
         pus22:
             subScheduleId:
                 bytes: 1
@@ -99,6 +135,10 @@ mdb:
   - type: "xtce"
     spec: "mdb/pus5.xml"
   - type: "xtce"
+    spec: "mdb/pus15.xml"
+  - type: "xtce"
+    spec: "mdb/pus11.xml"
+  - type: "xtce"
     spec: "mdb/pus17.xml"
   - type: "xtce"
     spec: "mdb/pus19.xml"
@@ -114,6 +154,7 @@ streamConfig:
   tm:
     - name: "tm_realtime"
       processor: "realtime"
+    - name: "tm_dump"
   invalidTm: "invalid_tm_stream"
   cmdHist: ["cmdhist_realtime", "cmdhist_dump"]
   event: ["events_realtime", "events_dump"]

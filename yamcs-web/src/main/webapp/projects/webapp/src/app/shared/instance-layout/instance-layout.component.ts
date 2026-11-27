@@ -135,6 +135,12 @@ export class InstanceLayoutComponent implements OnDestroy {
     if (this.config.tc && this.user.hasSystemPrivilege('ControlCommandQueue')) {
       this.commandingItems.push({ path: 'queues', label: 'Queues' });
     }
+    if (this.config.tc && this.user.hasSystemPrivilege('ReadOnboardSchedule')) {
+      this.commandingItems.push({
+        path: 'onboard-schedule',
+        label: 'On-board schedule',
+      });
+    }
     if (
       this.config.commandClearanceEnabled &&
       this.user.hasSystemPrivilege('ControlCommandClearances')

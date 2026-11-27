@@ -42,6 +42,13 @@ export class CommandFormComponent {
   @Input()
   stackMode = false;
 
+  /**
+   * Whether to show the comment and advanced options steps. Off when the form
+   * is used for something else than a command sent now (e.g. on-board schedule entries).
+   */
+  @Input()
+  commandSteps = true;
+
   commandArgumentsForm = viewChild.required(CommandArgumentsForm);
   commandOptionsForm = viewChild(CommandOptionsForm);
   commandCommentForm = viewChild(CommandCommentForm);
@@ -57,7 +64,7 @@ export class CommandFormComponent {
   }
 
   showCommandOptions() {
-    return this.user.hasSystemPrivilege('CommandOptions');
+    return this.commandSteps && this.user.hasSystemPrivilege('CommandOptions');
   }
 
   getResult(optionsStruct = false): CommandConfiguration {

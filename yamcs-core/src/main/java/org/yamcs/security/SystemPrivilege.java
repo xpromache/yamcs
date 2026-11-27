@@ -163,6 +163,16 @@ public class SystemPrivilege {
     public static final SystemPrivilege ControlTimeline = new SystemPrivilege("ControlTimeline");
 
     /**
+     * Allows to view the on-board command schedules
+     */
+    public static final SystemPrivilege ReadOnboardSchedule = new SystemPrivilege("ReadOnboardSchedule");
+
+    /**
+     * Allows to plan on-board scheduled commands and to synchronise the on-board schedules
+     */
+    public static final SystemPrivilege ControlOnboardSchedule = new SystemPrivilege("ControlOnboardSchedule");
+
+    /**
      * Allows to view system information (OS, JVM, threads, replication, ...)
      */
     public static final SystemPrivilege ReadSystemInfo = new SystemPrivilege("ReadSystemInfo");

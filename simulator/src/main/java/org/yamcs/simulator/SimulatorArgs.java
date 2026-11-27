@@ -62,6 +62,18 @@ public class SimulatorArgs {
             "subsequent versions of the same packet")
     public float perfChangePercent = 10;
 
+    @Parameter(names = "--los-cycle-aos", description = "PUS simulator automatic LOS/AOS cycle: duration of the AOS "
+            + "in seconds")
+    public int losCycleAosSeconds = 120;
+
+    @Parameter(names = "--los-cycle-los", description = "PUS simulator automatic LOS/AOS cycle: duration of the LOS "
+            + "in seconds. Set to 0 (default) to disable the automatic cycle")
+    public int losCycleLosSeconds = 0;
+
+    @Parameter(names = "--auto-dump-on-aos", arity = 1, description = "PUS simulator: dump on the LOS link all the "
+            + "packets stored since the last dump right after AOS")
+    public boolean autoDumpOnAos = true;
+
     @Parameter(names = "--type", description = "one of: pus or col")
     public String type = "col";
 

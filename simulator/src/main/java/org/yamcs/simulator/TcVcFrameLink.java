@@ -172,7 +172,7 @@ public class TcVcFrameLink {
             bb.get(b);
             packet = pktFactory.getPacket(b);
         }
-        simulator.processTc(packet);
+        simulator.processUplinkTc(packet);
     }
 
     private void processControlCommand(byte[] data, int offset, int length) {

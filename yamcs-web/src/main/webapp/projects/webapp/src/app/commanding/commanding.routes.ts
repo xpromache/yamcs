@@ -12,6 +12,7 @@ import { CommandComponent } from './command-history/command/command.component';
 import { CommandReportComponent } from './command-sender/command-report/command-report.component';
 import { ConfigureCommandComponent } from './command-sender/configure-command/configure-command.component';
 import { SendCommandComponent } from './command-sender/send-command/send-command.component';
+import { OnboardScheduleComponent } from './onboard-schedule/onboard-schedule.component';
 import { QueuedCommandsTabComponent } from './queues/queued-commands-tab/queued-commands-tab.component';
 import { QueuesActionLogTabComponent } from './queues/queues-action-log-tab/queues-action-log-tab.component';
 import { QueuesListComponent } from './queues/queues-list/queues-list.component';
@@ -42,6 +43,10 @@ export const ROUTES: Routes = [
     canActivateChild: [authGuardChildFn],
     runGuardsAndResolvers: 'always',
     children: [
+      {
+        path: 'onboard-schedule',
+        component: OnboardScheduleComponent,
+      },
       {
         path: 'clearances',
         canActivate: [clearancesEnabledGuardFn],

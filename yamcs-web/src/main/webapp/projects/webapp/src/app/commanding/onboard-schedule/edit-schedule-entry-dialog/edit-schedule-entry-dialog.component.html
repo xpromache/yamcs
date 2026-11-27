@@ -1,0 +1,92 @@
+@if (!(selectedCommand$ | async)) {
+  <div class="wrapper">
+    <ya-form [formGroup]="selectCommandForm">
+      <h2>Select command</h2>
+      <div class="command-table-wrapper">
+        <app-command-selector #commandSelector formControlName="command" />
+      </div>
+    </ya-form>
+  </div>
+  <div class="footer">
+    <mat-toolbar>
+      <mat-toolbar-row>
+        <ya-button mat-dialog-close>CANCEL</ya-button>
+      </mat-toolbar-row>
+    </mat-toolbar>
+  </div>
+}
+
+@if (selectedCommand$ | async; as command) {
+  <div class="wrapper">
+    <div class="command-detail">
+      <div class="names" style="margin-bottom: 0.5em">
+        <div>
+          @if (command.qualifiedName | spaceSystemName; as spaceSystem) {
+            <ya-text-action [padding]="false" (click)="returnToList(spaceSystem)">
+              {{ spaceSystem }}
+            </ya-text-action>
+          }
+          <h2>{{ command.name }}</h2>
+        </div>
+        @for (alias of command.alias || []; track alias) {
+          <div>
+            {{ alias.namespace }}
+            <br />
+            <h2>{{ alias.name }}</h2>
+          </div>
+        }
+      </div>
+      <app-command-form
+        #commandForm
+        [command]="command"
+        [templateProvider]="templateProvider!"
+        [commandSteps]="false">
+        <ya-stepper-step tail label="On-board schedule" [expanded]="true">
+          <div [formGroup]="scheduleForm">
+            <ya-field label="Release time">
+              <ya-date-time-input formControlName="releaseTime" />
+            </ya-field>
+            @for (opt of entryOptions; track opt.name) {
+              <ya-field [label]="opt.name">
+                @if (opt.type === 'BOOLEAN') {
+                  <select [formControlName]="'opt_' + opt.name">
+                    <option value="">
+                      {{ opt.defaultValue != null ? 'default (' + opt.defaultValue + ')' : 'default' }}
+                    </option>
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                } @else {
+                  <input
+                    [formControlName]="'opt_' + opt.name"
+                    [type]="isNumeric(opt) ? 'number' : 'text'"
+                    [placeholder]="opt.defaultValue != null ? 'default: ' + opt.defaultValue : 'default'" />
+                }
+                @if (opt.description) {
+                  <div class="hint">{{ opt.description }}</div>
+                }
+              </ya-field>
+            }
+            <ya-field label="Description">
+              <input formControlName="description" type="text" />
+            </ya-field>
+          </div>
+        </ya-stepper-step>
+      </app-command-form>
+    </div>
+  </div>
+  <div class="footer">
+    <mat-toolbar>
+      <mat-toolbar-row>
+        <ya-button mat-dialog-close>CANCEL</ya-button>
+        &nbsp;&nbsp;
+        <ya-button
+          appearance="primary"
+          (click)="handleOK()"
+          [disabled]="!commandForm.form.valid || !scheduleForm.valid">
+          {{ data.entry ? 'SAVE' : 'ADD' }}
+        </ya-button>
+      </mat-toolbar-row>
+    </mat-toolbar>
+  </div>
+}

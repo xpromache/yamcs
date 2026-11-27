@@ -95,18 +95,27 @@ public class ColSimulator extends AbstractSimulator {
         return losRecorder;
     }
 
+    @Override
+    public PowerHandler getPowerHandler() {
+        return powerDataHandler;
+    }
+
+    @Override
     public boolean isLOS() {
         return los;
     }
 
+    @Override
     public Date getLastLosStart() {
         return lastLosStart;
     }
 
+    @Override
     public Date getLastLosStop() {
         return lastLosStop;
     }
 
+    @Override
     public void setAOS() {
         if (los) {
             los = false;
@@ -115,6 +124,7 @@ public class ColSimulator extends AbstractSimulator {
         }
     }
 
+    @Override
     public void setLOS() {
         if (!los) {
             los = true;

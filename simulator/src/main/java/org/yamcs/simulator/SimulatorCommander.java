@@ -78,8 +78,14 @@ public class SimulatorCommander extends ProcessRunner {
         perfTestSpec.addOption("interval", OptionType.INTEGER);
         perfTestSpec.addOption("changePercent", OptionType.FLOAT);
 
+        Spec losCycleSpec = new Spec();
+        losCycleSpec.addOption("aosSeconds", OptionType.INTEGER).withRequired(true);
+        losCycleSpec.addOption("losSeconds", OptionType.INTEGER).withRequired(true);
+
         Spec spec = new Spec();
         spec.addOption("telnet", OptionType.MAP).withSpec(telnetSpec);
+        spec.addOption("losCycle", OptionType.MAP).withSpec(losCycleSpec);
+        spec.addOption("autoDumpOnAos", OptionType.BOOLEAN);
         spec.addOption("tctm", OptionType.MAP).withSpec(tmtcSpec);
         spec.addOption("frame", OptionType.MAP).withSpec(frameSpec);
         spec.addOption("perfTest", OptionType.MAP).withSpec(perfTestSpec);
@@ -113,6 +119,15 @@ public class SimulatorCommander extends ProcessRunner {
         if (config.containsKey("type")) {
             cmdl.add("--type");
             cmdl.add(config.getString("type"));
+        }
+
+        if (config.containsKey("losCycle")) {
+            YConfiguration losCycle = config.getConfig("losCycle");
+            cmdl.addAll(Arrays.asList("--los-cycle-aos", "" + losCycle.getInt("aosSeconds"),
+                    "--los-cycle-los", "" + losCycle.getInt("losSeconds")));
+        }
+        if (config.containsKey("autoDumpOnAos")) {
+            cmdl.addAll(Arrays.asList("--auto-dump-on-aos", "" + config.getBoolean("autoDumpOnAos")));
         }
 
         if (config.containsKey("tctm")) {
@@ -256,7 +271,12 @@ public class SimulatorCommander extends ProcessRunner {
             simulator = new ColSimulator(losDir, dataDir);
         } else if (runtimeOptions.type.equalsIgnoreCase("pus")) {
             pktFactory = TcPacketFactory.PUS_PACKET_FACTORY;
-            simulator = new PusSimulator(dataDir);
+            PusSimulator pusSimulator = new PusSimulator(dataDir);
+            pusSimulator.setAutoDumpOnAos(runtimeOptions.autoDumpOnAos);
+            if (runtimeOptions.losCycleLosSeconds > 0) {
+                pusSimulator.setLosCycle(runtimeOptions.losCycleAosSeconds, runtimeOptions.losCycleLosSeconds);
+            }
+            simulator = pusSimulator;
         } else {
             throw new ConfigurationException("Unknown simulator type '" + runtimeOptions.type + "'. Use COL or PUS");
         }
@@ -285,12 +305,10 @@ public class SimulatorCommander extends ProcessRunner {
             services.add(new TcpTmTcLink("TC", simulator, runtimeOptions.tcPort, pktFactory));
         }
 
-        if (simulator instanceof ColSimulator colSimulator) {
-            if (runtimeOptions.telnetPort != null) {
-                TelnetServer telnetServer = new TelnetServer(colSimulator);
-                telnetServer.setPort(runtimeOptions.telnetPort);
-                services.add(telnetServer);
-            }
+        if (runtimeOptions.telnetPort != null) {
+            TelnetServer telnetServer = new TelnetServer(simulator);
+            telnetServer.setPort(runtimeOptions.telnetPort);
+            services.add(telnetServer);
         }
 
         {

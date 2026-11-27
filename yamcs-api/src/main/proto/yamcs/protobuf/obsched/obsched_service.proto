@@ -1,0 +1,258 @@
+syntax="proto2";
+
+package yamcs.protobuf.obsched;
+
+option java_package = "org.yamcs.protobuf.obsched";
+option java_outer_classname = "OnboardSchedulerServiceProto";
+option java_multiple_files = true;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+import "yamcs/api/annotations.proto";
+import "yamcs/protobuf/obsched/obsched.proto";
+
+// Ground model of on-board time-tagged command schedules.
+//
+// Commands are planned on the ground at any time and synchronised to the
+// on-board schedule when there is contact. The status of each entry is
+// updated from telemetry, including telemetry dumped after LOS.
+service OnboardSchedulerApi {
+  option (yamcs.api.markdown) = true;
+
+  // List schedulers
+  rpc ListSchedulers(ListSchedulersRequest) returns (ListSchedulersResponse) {
+    option (yamcs.api.route) = {
+      get: "/api/onboard-scheduler/{instance}/schedulers"
+    };
+  }
+
+  // Get a scheduler
+  rpc GetScheduler(GetSchedulerRequest) returns (SchedulerInfo) {
+    option (yamcs.api.route) = {
+      get: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}"
+    };
+  }
+
+  // List entries, sorted by release time
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse) {
+    option (yamcs.api.route) = {
+      get: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries"
+    };
+  }
+
+  // Get an entry
+  rpc GetEntry(GetEntryRequest) returns (ScheduleEntryInfo) {
+    option (yamcs.api.route) = {
+      get: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries/{id}"
+    };
+  }
+
+  // Create an entry
+  rpc CreateEntry(CreateEntryRequest) returns (ScheduleEntryInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries"
+      body: "*"
+    };
+  }
+
+  // Update an entry.
+  //
+  // Only entries that have not been released can be updated. If the entry is
+  // on board, the next sync replaces the on-board copy.
+  rpc UpdateEntry(UpdateEntryRequest) returns (ScheduleEntryInfo) {
+    option (yamcs.api.route) = {
+      patch: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries/{id}"
+      body: "*"
+    };
+  }
+
+  // Delete an entry.
+  //
+  // An entry that is not on board is deleted immediately. An entry that is on
+  // board is marked DELETE_PENDING and removed from the on-board schedule at
+  // the next sync. Released entries cannot be deleted.
+  rpc DeleteEntry(DeleteEntryRequest) returns (ScheduleEntryInfo) {
+    option (yamcs.api.route) = {
+      delete: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries/{id}"
+    };
+  }
+
+  // Compute the steps a sync would execute, without executing them.
+  //
+  // If the adapter supports it, the on-board schedule is read back first,
+  // which requires contact with the spacecraft.
+  rpc PlanSync(PlanSyncRequest) returns (SyncInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:planSync"
+      body: "*"
+    };
+  }
+
+  // Synchronise the on-board schedule with the ground plan.
+  //
+  // Returns when the sync has finished.
+  rpc Sync(SyncRequest) returns (SyncInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:sync"
+      body: "*"
+    };
+  }
+
+  // Read back the on-board schedule and reconcile the ground entries with it,
+  // without changing anything on board.
+  rpc Refresh(RefreshRequest) returns (SyncInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:refresh"
+      body: "*"
+    };
+  }
+
+  // Receive updates on entries
+  rpc SubscribeEntries(SubscribeEntriesRequest) returns (stream ScheduleEntryInfo) {
+    option (yamcs.api.websocket) = {
+      topic: "onboard-schedule-entries"
+    };
+  }
+}
+
+message ListSchedulersRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+}
+
+message ListSchedulersResponse {
+  repeated SchedulerInfo schedulers = 1;
+}
+
+message GetSchedulerRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}
+
+message ListEntriesRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Only entries released at or after this time
+  optional google.protobuf.Timestamp start = 3;
+
+  // Only entries released before this time
+  optional google.protobuf.Timestamp stop = 4;
+
+  // Include entries with intent DELETED. Default: false
+  optional bool includeDeleted = 5;
+
+  // Include the evidence log of each entry. Default: false
+  optional bool details = 6;
+}
+
+message ListEntriesResponse {
+  repeated ScheduleEntryInfo entries = 1;
+}
+
+message GetEntryRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Entry identifier
+  optional string id = 3;
+}
+
+message CreateEntryRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Qualified command name
+  optional string command = 3;
+
+  // Command arguments
+  optional google.protobuf.Struct args = 4;
+
+  // Release time
+  optional google.protobuf.Timestamp releaseTime = 5;
+
+  // Adapter-specific options
+  optional google.protobuf.Struct options = 6;
+
+  optional string description = 7;
+  repeated string tags = 8;
+}
+
+message UpdateEntryRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Entry identifier
+  optional string id = 3;
+
+  // Fields left unset are not changed
+  optional string command = 4;
+  optional google.protobuf.Struct args = 5;
+  optional google.protobuf.Timestamp releaseTime = 6;
+  optional google.protobuf.Struct options = 7;
+  optional string description = 8;
+  optional TagList tags = 9;
+}
+
+message TagList {
+  repeated string tags = 1;
+}
+
+message DeleteEntryRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Entry identifier
+  optional string id = 3;
+}
+
+message PlanSyncRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}
+
+message SyncRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}
+
+message RefreshRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}
+
+message SubscribeEntriesRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}

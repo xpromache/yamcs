@@ -1,0 +1,261 @@
+<ya-instance-page>
+  <ya-instance-toolbar>
+    <ng-template ya-instance-toolbar-label>
+      On-board schedule
+      <ya-help>
+        <p>
+          Time-tagged commands planned on the ground for the on-board scheduler. Entries can be
+          planned at any time, also during LOS.
+        </p>
+        <p>
+          <strong>Sync</strong> reads the on-board schedule back (if supported), reconciles the
+          entries with it, then inserts, deletes or replaces on-board entries so that the
+          on-board schedule matches the ground plan. <strong>Plan sync</strong> only shows what a
+          sync would do. <strong>Read back</strong> only reconciles.
+        </p>
+        <p>
+          The state of each entry is updated from telemetry, including telemetry recorded on
+          board during LOS and dumped afterwards.
+        </p>
+      </ya-help>
+    </ng-template>
+
+    @if (scheduler$ | async; as scheduler) {
+      <ya-page-button (click)="addEntry()" icon="add_circle">Add entry</ya-page-button>
+      @if (scheduler.capabilities.readBack) {
+        <ya-page-button
+          (click)="sync('refresh')"
+          icon="download"
+          [disabled]="(syncing$ | async) !== null">
+          Read back
+        </ya-page-button>
+      }
+      <ya-page-button
+        (click)="sync('planSync')"
+        icon="preview"
+        [disabled]="(syncing$ | async) !== null">
+        Plan sync
+      </ya-page-button>
+      <ya-page-button
+        (click)="sync('sync')"
+        icon="sync"
+        [disabled]="(syncing$ | async) !== null">
+        Sync
+      </ya-page-button>
+      <ya-page-button (click)="toggleDeleted()" icon="delete_sweep">
+        {{ showDeleted ? 'Hide deleted' : 'Show deleted' }}
+      </ya-page-button>
+    }
+  </ya-instance-toolbar>
+
+  <ya-panel>
+    @if ((schedulers$ | async)?.length === 0) {
+      <ya-empty-message>
+        No on-board scheduler is configured for this instance. Add an
+        <code>org.yamcs.obsched.OnboardSchedulerService</code> to the instance services.
+      </ya-empty-message>
+    }
+
+    @if (scheduler$ | async; as scheduler) {
+      @if ((schedulers$ | async)!.length > 1) {
+        <p>
+          Scheduler:
+          @for (s of schedulers$ | async; track s.name) {
+            <ya-text-action
+              (click)="selectScheduler(s)"
+              [class.active]="s.name === scheduler.name">
+              {{ s.name }}
+            </ya-text-action>
+          }
+        </p>
+      }
+      <p class="hint">
+        {{ scheduler.name }} ({{ scheduler.adapter }}) &middot;
+        {{ scheduler.capabilities.readBack ? 'read-back' : 'no read-back' }} &middot;
+        {{ scheduler.capabilities.entryLevelEdit ? 'entry-level edits' : 'whole-schedule replace' }}
+        &middot; minimum lead time {{ +scheduler.capabilities.minLeadTime / 1000 }} s
+      </p>
+
+      @if (syncing$ | async; as mode) {
+        <p class="hint">
+          {{ mode === 'planSync' ? 'Planning sync' : mode === 'sync' ? 'Syncing' : 'Reading back' }}…
+        </p>
+      }
+
+      @if (filterValues$ | async; as filters) {
+        @if (filters.length) {
+          <ya-filter-bar [formGroup]="filterForm">
+            @for (f of filters; track f.option.name) {
+              <ya-select [formControlName]="f.option.name">
+                <ya-option id="" [label]="'Any ' + (f.option.description || f.option.name)" />
+                @for (v of f.values; track v) {
+                  <ya-option
+                    [id]="v"
+                    [label]="(f.option.description || f.option.name) + ': ' + optionLabel(v)" />
+                }
+              </ya-select>
+            }
+          </ya-filter-bar>
+        }
+      }
+
+      <table yaDataTable style="width: 100%">
+        <tr>
+          <th>Release time</th>
+          <th>Command</th>
+          <th>State</th>
+          <th>Intent</th>
+          <th>Ref</th>
+          <th>Rev</th>
+          <th>Last evidence</th>
+          <th></th>
+        </tr>
+        @for (entry of entries$ | async; track entry.id) {
+          <tr [class.deleted]="entry.intent !== 'PLANNED'">
+            <td style="white-space: nowrap">{{ entry.releaseTime | datetime }}</td>
+            <td>
+              {{ entry.command }}
+              @if (hasValues(entry.args)) {
+                <div class="assignments" [title]="formatValues(entry.args)">
+                  {{ formatValues(entry.args, 4) }}
+                </div>
+              }
+              @let opts = effectiveOptions(entry);
+              @if (opts.length) {
+                <div class="assignments">
+                  @for (o of opts; track o.name; let last = $last) {
+                    <span
+                      [class.default]="o.isDefault"
+                      [title]="o.isDefault ? 'default value' : ''">
+                      {{ o.name }}: {{ o.value }}{{ last ? '' : ',' }}
+                    </span>
+                  }
+                </div>
+              }
+              @if (entry.description) {
+                <div class="hint">{{ entry.description }}</div>
+              }
+            </td>
+            <td>
+              <span class="state" [ngClass]="stateClass(entry)">{{ entry.state }}</span>
+            </td>
+            <td>{{ entry.intent }}</td>
+            <td>{{ entry.ref || '-' }}</td>
+            <td>
+              {{ entry.revision }}
+              @if (entry.uploadedRevision && entry.uploadedRevision !== entry.revision) {
+                <span class="hint">(on board: {{ entry.uploadedRevision }})</span>
+              }
+            </td>
+            <td class="evidence">
+              @if (lastEvidence(entry); as ev) {
+                {{ ev.message }}
+                <div class="hint">{{ ev.source }} &middot; {{ ev.time | datetime }}</div>
+              }
+            </td>
+            <td style="text-align: right; white-space: nowrap">
+              <ya-icon-action icon="list" matTooltip="Evidence" (click)="toggleDetails(entry)" />
+              @if (isEditable(entry)) {
+                <ya-icon-action icon="edit" matTooltip="Edit" (click)="editEntry(entry)" />
+                <ya-icon-action icon="delete" matTooltip="Delete" (click)="deleteEntry(entry)" />
+              }
+            </td>
+          </tr>
+          @if ((expanded$ | async)?.id === entry.id) {
+            <tr>
+              <td colspan="8" class="details">
+                @let details = expanded$ | async;
+                @if (hasValues(details?.args)) {
+                  <h4>Arguments</h4>
+                  <dl class="values">
+                    @for (kv of entries(details?.args); track kv[0]) {
+                      <dt>{{ kv[0] }}</dt>
+                      <dd>{{ formatValue(kv[1]) }}</dd>
+                    }
+                  </dl>
+                }
+                @if (hasValues(details?.options)) {
+                  <h4>Options</h4>
+                  <dl class="values">
+                    @for (kv of entries(details?.options); track kv[0]) {
+                      <dt>{{ kv[0] }}</dt>
+                      <dd>{{ formatValue(kv[1]) }}</dd>
+                    }
+                  </dl>
+                }
+                <h4>Evidence</h4>
+                <table yaDataTable style="width: 100%">
+                  <tr>
+                    <th>Time</th>
+                    <th>Received</th>
+                    <th>Source</th>
+                    <th>State</th>
+                    <th>Message</th>
+                  </tr>
+                  @for (ev of details?.evidence; track $index) {
+                    <tr>
+                      <td>{{ ev.time | datetime }}</td>
+                      <td>{{ ev.receptionTime | datetime }}</td>
+                      <td>{{ ev.source }}</td>
+                      <td>{{ ev.state || '-' }}</td>
+                      <td>{{ ev.message || '-' }}</td>
+                    </tr>
+                  }
+                </table>
+                @if (details?.uploads?.length) {
+                  <p class="hint">
+                    Uploads (command history ids):
+                    @for (u of details?.uploads; track u.commandId) {
+                      {{ u.commandId }} (rev {{ u.revision }}, ref {{ u.ref || '-' }})&nbsp;
+                    }
+                  </p>
+                }
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr>
+            <td colspan="8">No entries</td>
+          </tr>
+        }
+      </table>
+
+      @if (syncResult$ | async; as result) {
+        <h3>
+          {{ result.dryRun ? 'Planned sync' : 'Last sync' }}: {{ result.status }}
+          <span class="hint">{{ result.start | datetime }} by {{ result.user }}</span>
+        </h3>
+        @if (result.failureReason) {
+          <p class="error">{{ result.failureReason }}</p>
+        }
+        @if (result.steps?.length) {
+          <table yaDataTable style="width: 100%">
+            <tr>
+              <th>Step</th>
+              <th>Result</th>
+            </tr>
+            @for (step of result.steps; track $index) {
+              <tr>
+                <td>{{ step.description }}</td>
+                <td>{{ step.error ? 'ERROR: ' + step.error : step.done ? 'done' : '-' }}</td>
+              </tr>
+            }
+          </table>
+        } @else {
+          <p class="hint">Nothing to change on board.</p>
+        }
+        @for (w of result.warnings; track $index) {
+          <p class="warning">{{ w }}</p>
+        }
+        @if (result.foreignItems?.length) {
+          <p>Items on board that are not in the ground plan:</p>
+          <ul>
+            @for (f of result.foreignItems; track f.ref) {
+              <li>{{ f.ref }} at {{ f.releaseTime | datetime }} {{ f.description }}</li>
+            }
+          </ul>
+        }
+      }
+    }
+  </ya-panel>
+</ya-instance-page>

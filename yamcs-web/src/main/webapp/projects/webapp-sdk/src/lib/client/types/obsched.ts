@@ -1,0 +1,150 @@
+import { WebSocketCall } from '../WebSocketCall';
+
+export type EntryIntent = 'PLANNED' | 'DELETE_PENDING' | 'DELETED';
+
+export type EntryState =
+  | 'NOT_ONBOARD'
+  | 'UPLOAD_PENDING'
+  | 'ONBOARD'
+  | 'RELEASED'
+  | 'STARTED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'MISSED'
+  | 'SKIPPED'
+  | 'UNKNOWN';
+
+export type EvidenceSource = 'GROUND' | 'REALTIME' | 'DUMP' | 'READBACK';
+
+export interface EntryEvidence {
+  time: string;
+  receptionTime: string;
+  source: EvidenceSource;
+  state?: EntryState;
+  message?: string;
+}
+
+export interface EntryUpload {
+  commandId: string;
+  ref?: string;
+  time: string;
+  revision: number;
+}
+
+export interface ScheduleEntry {
+  id: string;
+  scheduler: string;
+  command: string;
+  args?: { [key: string]: any };
+  releaseTime: string;
+  options?: { [key: string]: any };
+  description?: string;
+  tags?: string[];
+  revision: number;
+  uploadedRevision: number;
+  intent: EntryIntent;
+  state: EntryState;
+  ref?: string;
+  stateMessage?: string;
+  created?: string;
+  createdBy?: string;
+  modified?: string;
+  modifiedBy?: string;
+  uploads?: EntryUpload[];
+  evidence?: EntryEvidence[];
+}
+
+export interface SchedulerCapabilities {
+  readBack: boolean;
+  entryLevelEdit: boolean;
+  observableStates: EntryState[];
+  minLeadTime: string;
+}
+
+export interface EntryOptionInfo {
+  name: string;
+  type: string;
+  description?: string;
+  /** Value applied on board when an entry does not set the option */
+  defaultValue?: any;
+  /** Whether the option partitions the schedule and is worth filtering on */
+  filterable?: boolean;
+}
+
+export interface SyncStep {
+  description: string;
+  entryIds?: string[];
+  done?: boolean;
+  error?: string;
+}
+
+export interface ForeignItem {
+  ref: string;
+  releaseTime: string;
+  description?: string;
+}
+
+export interface SyncInfo {
+  id: string;
+  status: 'SYNC_RUNNING' | 'SYNC_SUCCEEDED' | 'SYNC_FAILED';
+  dryRun: boolean;
+  start: string;
+  stop?: string;
+  user: string;
+  steps?: SyncStep[];
+  foreignItems?: ForeignItem[];
+  warnings?: string[];
+  failureReason?: string;
+}
+
+export interface OnboardScheduler {
+  name: string;
+  adapter: string;
+  processor: string;
+  capabilities: SchedulerCapabilities;
+  lastSync?: SyncInfo;
+  entryOptions?: EntryOptionInfo[];
+}
+
+export interface ListOnboardSchedulersResponse {
+  schedulers?: OnboardScheduler[];
+}
+
+export interface ListScheduleEntriesOptions {
+  start?: string;
+  stop?: string;
+  includeDeleted?: boolean;
+  details?: boolean;
+}
+
+export interface ListScheduleEntriesResponse {
+  entries?: ScheduleEntry[];
+}
+
+export interface CreateScheduleEntryRequest {
+  command: string;
+  args?: { [key: string]: any };
+  releaseTime: string;
+  options?: { [key: string]: any };
+  description?: string;
+  tags?: string[];
+}
+
+export interface UpdateScheduleEntryRequest {
+  command?: string;
+  args?: { [key: string]: any };
+  releaseTime?: string;
+  options?: { [key: string]: any };
+  description?: string;
+  tags?: { tags: string[] };
+}
+
+export interface SubscribeScheduleEntriesRequest {
+  instance: string;
+  scheduler: string;
+}
+
+export type ScheduleEntriesSubscription = WebSocketCall<
+  SubscribeScheduleEntriesRequest,
+  ScheduleEntry
+>;

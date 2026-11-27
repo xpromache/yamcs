@@ -175,7 +175,7 @@ public class UslpVcFrameLink {
         SimulatorCcsdsPacket packet = (CcsdsPacket.getAPID(bb) == CfdpCcsdsPacket.APID)
                 ? new CfdpCcsdsPacket(bb)
                 : new ColumbusCcsdsPacket(bb);
-        simulator.processTc(packet);
+        simulator.processUplinkTc(packet);
     }
 
     public int getCLCW() {

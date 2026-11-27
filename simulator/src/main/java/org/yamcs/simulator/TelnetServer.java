@@ -26,12 +26,12 @@ public class TelnetServer extends AbstractService {
     private static final StringDecoder STRING_DECODER = new StringDecoder(CharsetUtil.US_ASCII);
     private static final StringEncoder STRING_ENCODER = new StringEncoder(CharsetUtil.US_ASCII);
 
-    private ColSimulator simulator;
+    private AbstractSimulator simulator;
     private int port = 8023;
 
     private NioEventLoopGroup eventLoopGroup;
 
-    public TelnetServer(ColSimulator simulator) {
+    public TelnetServer(AbstractSimulator simulator) {
         this.simulator = simulator;
     }
 

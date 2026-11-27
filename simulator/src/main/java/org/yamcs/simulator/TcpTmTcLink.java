@@ -42,6 +42,10 @@ public class TcpTmTcLink extends AbstractExecutionThreadService {
         this.packetFactory = packetFactory;
     }
 
+    public boolean isConnected() {
+        return connected;
+    }
+
     public void sendPacket(byte[] packet) {
         try {
             if (connected) {
@@ -77,7 +81,7 @@ public class TcpTmTcLink extends AbstractExecutionThreadService {
                 while (socket.getInputStream().available() > 0) {
                     SimulatorCcsdsPacket tc = readPacket(inputStream);
                     if (tc != null) {
-                        simulator.processTc(tc);
+                        simulator.processUplinkTc(tc);
                     } else {
                         connected = false;
                     }

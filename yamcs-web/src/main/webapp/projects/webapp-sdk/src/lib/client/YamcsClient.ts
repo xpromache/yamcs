@@ -159,6 +159,18 @@ import {
   Value,
 } from './types/monitoring';
 import {
+  CreateScheduleEntryRequest,
+  ListOnboardSchedulersResponse,
+  ListScheduleEntriesOptions,
+  ListScheduleEntriesResponse,
+  OnboardScheduler,
+  ScheduleEntriesSubscription,
+  ScheduleEntry,
+  SubscribeScheduleEntriesRequest,
+  SyncInfo,
+  UpdateScheduleEntryRequest,
+} from './types/obsched';
+import {
   CreateParameterListRequest,
   GetParameterListsResponse,
   ParameterList,
@@ -744,6 +756,93 @@ export default class YamcsClient implements HttpHandler {
     return await this.doFetch(url, {
       method: 'DELETE',
     });
+  }
+
+  async getOnboardSchedulers(instance: string) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers`;
+    const response = await this.doFetch(url);
+    const wrapper = (await response.json()) as ListOnboardSchedulersResponse;
+    return wrapper.schedulers || [];
+  }
+
+  async getOnboardScheduler(instance: string, scheduler: string) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}`;
+    const response = await this.doFetch(url);
+    return (await response.json()) as OnboardScheduler;
+  }
+
+  async getScheduleEntries(
+    instance: string,
+    scheduler: string,
+    options: ListScheduleEntriesOptions = {},
+  ) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries`;
+    const response = await this.doFetch(url + this.queryString(options));
+    const wrapper = (await response.json()) as ListScheduleEntriesResponse;
+    return wrapper.entries || [];
+  }
+
+  async getScheduleEntry(instance: string, scheduler: string, id: string) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries/${id}`;
+    const response = await this.doFetch(url);
+    return (await response.json()) as ScheduleEntry;
+  }
+
+  async createScheduleEntry(
+    instance: string,
+    scheduler: string,
+    options: CreateScheduleEntryRequest,
+  ) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries`;
+    const response = await this.doFetch(url, {
+      body: JSON.stringify(options),
+      method: 'POST',
+    });
+    return (await response.json()) as ScheduleEntry;
+  }
+
+  async updateScheduleEntry(
+    instance: string,
+    scheduler: string,
+    id: string,
+    options: UpdateScheduleEntryRequest,
+  ) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries/${id}`;
+    const response = await this.doFetch(url, {
+      body: JSON.stringify(options),
+      method: 'PATCH',
+    });
+    return (await response.json()) as ScheduleEntry;
+  }
+
+  async deleteScheduleEntry(instance: string, scheduler: string, id: string) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries/${id}`;
+    const response = await this.doFetch(url, { method: 'DELETE' });
+    return (await response.json()) as ScheduleEntry;
+  }
+
+  /**
+   * mode: planSync (dry run), sync or refresh (read back only)
+   */
+  async syncOnboardSchedule(
+    instance: string,
+    scheduler: string,
+    mode: 'planSync' | 'sync' | 'refresh',
+  ) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}:${mode}`;
+    const response = await this.doFetch(url, { body: '{}', method: 'POST' });
+    return (await response.json()) as SyncInfo;
+  }
+
+  createScheduleEntriesSubscription(
+    options: SubscribeScheduleEntriesRequest,
+    observer: (entry: ScheduleEntry) => void,
+  ): ScheduleEntriesSubscription {
+    return this.webSocketClient!.createSubscription(
+      'onboard-schedule-entries',
+      options,
+      observer,
+    );
   }
 
   async getParameterLists(instance: string) {
