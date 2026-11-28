@@ -7,8 +7,8 @@ import java.util.UUID;
 
 import org.yamcs.protobuf.obsched.EntryIntent;
 import org.yamcs.protobuf.obsched.EntryState;
-import org.yamcs.protobuf.obsched.EvidenceInfo;
-import org.yamcs.protobuf.obsched.EvidenceSource;
+import org.yamcs.protobuf.obsched.HistoryRecordInfo;
+import org.yamcs.protobuf.obsched.RecordSource;
 import org.yamcs.protobuf.obsched.ScheduleEntryInfo;
 import org.yamcs.protobuf.obsched.UploadInfo;
 import org.yamcs.utils.TimeEncoding;
@@ -27,7 +27,7 @@ import com.google.protobuf.Struct;
 public class ScheduleEntry {
 
     /**
-     * Order of the "forward" states. Evidence can only move an entry to a higher rank, so that late or out of order
+     * Order of the "forward" states. Status reports can only move an entry to a higher rank, so that late or out of order
      * telemetry (e.g. from dumps) does not regress the state.
      */
     static int rank(EntryState state) {
@@ -61,7 +61,7 @@ public class ScheduleEntry {
     private long modified;
     private String modifiedBy;
     private List<UploadInfo> uploads = new ArrayList<>();
-    private List<EvidenceInfo> evidence = new ArrayList<>();
+    private List<HistoryRecordInfo> history = new ArrayList<>();
 
     public ScheduleEntry(UUID id, String scheduler) {
         this.id = id;
@@ -88,7 +88,7 @@ public class ScheduleEntry {
         this.modified = info.hasModified() ? TimeEncoding.fromProtobufTimestamp(info.getModified()) : 0;
         this.modifiedBy = info.hasModifiedBy() ? info.getModifiedBy() : null;
         this.uploads = new ArrayList<>(info.getUploadsList());
-        this.evidence = new ArrayList<>(info.getEvidenceList());
+        this.history = new ArrayList<>(info.getHistoryList());
     }
 
     public ScheduleEntry copy() {
@@ -131,20 +131,55 @@ public class ScheduleEntry {
             b.setModifiedBy(modifiedBy);
         }
         if (details) {
-            b.addAllEvidence(evidence);
-        } else if (!evidence.isEmpty()) {
-            b.addEvidence(evidence.get(evidence.size() - 1));
+            b.addAllHistory(history);
+        } else if (!history.isEmpty()) {
+            b.addHistory(history.get(history.size() - 1));
         }
         return b.build();
     }
 
     /**
-     * Applies a state implied by evidence, if it moves the entry forward. The evidence is always recorded.
+     * Checks whether a status report about the given ref can be about this entry.
+     * <p>
+     * Refs are made of on-board counters that wrap or restart (e.g. the PUS sequence count after a reboot), so a ref
+     * may later identify an unrelated command. A report about the execution of the entry (release and later) is only
+     * accepted if it is not older than the upload of the copy with that ref, and if it is close to the release time:
+     * from {@code tolerance} before to {@code window} after it. Later reports are accepted only while the entry is
+     * executing (released or started), for long running commands. Other reports (e.g. the confirmation of the insert)
+     * are not about the execution and are always accepted.
+     */
+    public boolean isPlausibleReport(String ref, long time, EntryState reportedState, long tolerance, long window) {
+        if (!isExecutionState(reportedState)) {
+            return true;
+        }
+        for (var u : uploads) {
+            if (ref.equals(u.getRef()) && u.hasTime()
+                    && time < TimeEncoding.fromProtobufTimestamp(u.getTime()) - tolerance) {
+                return false;
+            }
+        }
+        if (time < releaseTime - tolerance) {
+            return false;
+        }
+        if (time <= releaseTime + window) {
+            return true;
+        }
+        return reportedState != EntryState.RELEASED
+                && (state == EntryState.RELEASED || state == EntryState.STARTED);
+    }
+
+    private static boolean isExecutionState(EntryState s) {
+        return s == EntryState.RELEASED || s == EntryState.STARTED || s == EntryState.COMPLETED
+                || s == EntryState.FAILED || s == EntryState.SKIPPED;
+    }
+
+    /**
+     * Applies a state reported for the entry, if it moves the entry forward. The report is always recorded in the history.
      *
      * @return true if the state changed
      */
-    boolean applyEvidence(long time, long receptionTime, EvidenceSource source, EntryState newState, String message) {
-        addEvidence(time, receptionTime, source, newState, message);
+    boolean applyStatus(long time, long receptionTime, RecordSource source, EntryState newState, String message) {
+        addRecord(time, receptionTime, source, newState, message);
         if (newState == null || newState == state) {
             return false;
         }
@@ -157,16 +192,16 @@ public class ScheduleEntry {
     }
 
     /**
-     * Sets the state unconditionally (used by reconciliation and by the ground actions), recording it as evidence.
+     * Sets the state unconditionally (used by reconciliation and by the ground actions), recording it in the history.
      */
-    void forceState(long time, EvidenceSource source, EntryState newState, String message) {
-        addEvidence(time, time, source, newState, message);
+    void forceState(long time, RecordSource source, EntryState newState, String message) {
+        addRecord(time, time, source, newState, message);
         state = newState;
         stateMessage = message;
     }
 
-    void addEvidence(long time, long receptionTime, EvidenceSource source, EntryState newState, String message) {
-        var eb = EvidenceInfo.newBuilder()
+    void addRecord(long time, long receptionTime, RecordSource source, EntryState newState, String message) {
+        var eb = HistoryRecordInfo.newBuilder()
                 .setTime(TimeEncoding.toProtobufTimestamp(time))
                 .setReceptionTime(TimeEncoding.toProtobufTimestamp(receptionTime))
                 .setSource(source);
@@ -176,7 +211,7 @@ public class ScheduleEntry {
         if (message != null) {
             eb.setMessage(message);
         }
-        evidence.add(eb.build());
+        history.add(eb.build());
     }
 
     void addUpload(String commandId, long time) {
@@ -369,8 +404,8 @@ public class ScheduleEntry {
         return Collections.unmodifiableList(uploads);
     }
 
-    public List<EvidenceInfo> getEvidence() {
-        return Collections.unmodifiableList(evidence);
+    public List<HistoryRecordInfo> getHistory() {
+        return Collections.unmodifiableList(history);
     }
 
     @Override

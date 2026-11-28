@@ -33,7 +33,7 @@ import org.yamcs.obsched.SyncPlan;
 import org.yamcs.obsched.SyncPlan.SyncStep;
 import org.yamcs.protobuf.obsched.EntryIntent;
 import org.yamcs.protobuf.obsched.EntryState;
-import org.yamcs.protobuf.obsched.EvidenceSource;
+import org.yamcs.protobuf.obsched.RecordSource;
 import org.yamcs.tctm.ccsds.time.CucTimeDecoder;
 import org.yamcs.utils.ByteArrayUtils;
 import org.yamcs.utils.TimeEncoding;
@@ -51,7 +51,7 @@ import org.yamcs.yarch.YarchDatabase;
  * block configured.</li>
  * <li>Entries are deleted with TC[11,5] (delete by request identifier).</li>
  * <li>The on-board schedule is read back with TC[11,17] (summary report all), answered by TM[11,13].</li>
- * <li>Execution evidence comes from the PUS ST[1] verification reports of the released TCs, received in realtime or
+ * <li>The execution status comes from the PUS ST[1] verification reports of the released TCs, received in realtime or
  * in dumps of on-board stored TM.</li>
  * </ul>
  * The on-board reference of an entry is {@code apid/seqCount} of the scheduled TC: the PUS ST[1] reports identify the
@@ -202,6 +202,17 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
     }
 
     @Override
+    public String getRefLabel() {
+        return "APID/Seq";
+    }
+
+    @Override
+    public String getRefDescription() {
+        return "APID and sequence count of the scheduled TC, identifying the on-board activity"
+                + " (the PUS request id, without the source id)";
+    }
+
+    @Override
     public Set<String> getFilterableOptions() {
         return Set.of(OPT_SUB_SCHEDULE, OPT_GROUP);
     }
@@ -209,13 +220,13 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
     @Override
     public void start() {
         var ydb = YarchDatabase.getInstance(ctx.getYamcsInstance());
-        subscribe(ydb.getStream(realtimeStreamName), realtimeStreamName, EvidenceSource.REALTIME, true);
+        subscribe(ydb.getStream(realtimeStreamName), realtimeStreamName, RecordSource.REALTIME, true);
         for (var name : dumpStreamNames) {
-            subscribe(ydb.getStream(name), name, EvidenceSource.DUMP, false);
+            subscribe(ydb.getStream(name), name, RecordSource.DUMP, false);
         }
     }
 
-    private void subscribe(Stream stream, String name, EvidenceSource source, boolean realtime) {
+    private void subscribe(Stream stream, String name, RecordSource source, boolean realtime) {
         if (stream == null) {
             if (realtime) {
                 throw new ConfigurationException("Stream " + name + " does not exist");
@@ -246,7 +257,7 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
     // ---------------------------------------------------------------------------------------------------------------
     // Telemetry
 
-    void processPacket(Tuple tuple, EvidenceSource source, boolean realtime) {
+    void processPacket(Tuple tuple, RecordSource source, boolean realtime) {
         byte[] packet = tuple.getColumn(StandardTupleDefinitions.TM_PACKET_COLUMN);
         long gentime = tuple.getTimestampColumn(StandardTupleDefinitions.GENTIME_COLUMN);
         if (packet.length < tmUserDataOffset || (packet[0] & 0x08) == 0) { // no secondary header
@@ -261,7 +272,7 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
         }
     }
 
-    private void processVerificationReport(byte[] packet, int subtype, long gentime, EvidenceSource source,
+    private void processVerificationReport(byte[] packet, int subtype, long gentime, RecordSource source,
             boolean realtime) {
         int offset = tmUserDataOffset;
         if (packet.length < offset + 4) {
@@ -292,7 +303,7 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
             if (pendingInsert != null) {
                 // report about the TC[11,4] carrying the entry, not about the entry itself
                 if (subtype == 7) {
-                    ctx.reportEvidence(pendingInsert.innerRef(), gentime, source, EntryState.ONBOARD,
+                    ctx.reportStatus(pendingInsert.innerRef(), gentime, source, EntryState.ONBOARD,
                             "Inserted in the on-board schedule");
                 }
             }
@@ -316,7 +327,7 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
         default -> null;
         };
         if (state != null) {
-            ctx.reportEvidence(ref, gentime, source, state,
+            ctx.reportStatus(ref, gentime, source, state,
                     failure ? failureMessage : "TM[1," + subtype + "] " + stageName(subtype));
         }
     }
@@ -636,7 +647,7 @@ public class Pus11SchedulerAdapter implements SchedulerAdapter {
                     }
                 }
                 if (f.isDone() && !f.isCompletedExceptionally()) {
-                    ctx.reportEvidence(refs[0], ctx.getProcessor().getCurrentTime(), EvidenceSource.REALTIME,
+                    ctx.reportStatus(refs[0], ctx.getProcessor().getCurrentTime(), RecordSource.REALTIME,
                             EntryState.ONBOARD, "Inserted in the on-board schedule");
                 }
                 return f;

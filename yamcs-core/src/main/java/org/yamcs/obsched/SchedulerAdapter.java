@@ -12,8 +12,8 @@ import org.yamcs.YConfiguration;
  * Service provider interface implemented for each on-board scheduling framework (PUS ST[11], cFS SC, F´, C2A...).
  * <p>
  * The generic {@link OnboardSchedulerService} keeps the ground model, computes what has to change and records the
- * evidence; the adapter knows how to talk to the on-board scheduler: how to insert and delete entries, how to read the
- * schedule back and how to recognise execution evidence in the telemetry.
+ * status; the adapter knows how to talk to the on-board scheduler: how to insert and delete entries, how to read the
+ * schedule back and how to recognise the execution status in the telemetry.
  * <p>
  * Adapters are created by reflection and must have a public no-argument constructor.
  */
@@ -55,7 +55,22 @@ public interface SchedulerAdapter {
     }
 
     /**
-     * Starts listening to telemetry for execution evidence.
+     * @return short name of the on-board reference of the entries (see {@link ScheduleEntry#getRef()}), used as
+     *         column header in the user interface
+     */
+    default String getRefLabel() {
+        return "Ref";
+    }
+
+    /**
+     * @return explanation of the on-board reference, or null
+     */
+    default String getRefDescription() {
+        return null;
+    }
+
+    /**
+     * Starts listening to telemetry for the execution status.
      */
     void start();
 

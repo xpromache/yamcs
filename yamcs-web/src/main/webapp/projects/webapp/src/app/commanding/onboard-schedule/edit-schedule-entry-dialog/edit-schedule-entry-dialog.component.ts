@@ -32,6 +32,8 @@ export interface EditScheduleEntryDialogData {
   entry?: ScheduleEntry;
   /** Command of the edited entry, already resolved. */
   command?: Command;
+  /** The entry is on board: the result replaces it by a new entry instead of changing it */
+  replace?: boolean;
   /** Initial release time for a new entry */
   releaseTime?: Date;
 }

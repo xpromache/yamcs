@@ -64,3 +64,10 @@ div.names ::ng-deep .text-action {
   color: var(--y-foreground-muted, #888);
   font-size: 11px;
 }
+
+.replace-note {
+  padding: 8px 12px;
+  margin: 0 0 12px 0;
+  border-left: 3px solid #1e88e5;
+  background-color: rgba(30, 136, 229, 0.08);
+}

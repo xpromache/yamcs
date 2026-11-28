@@ -58,11 +58,23 @@ service OnboardSchedulerApi {
 
   // Update an entry.
   //
-  // Only entries that have not been released can be updated. If the entry is
-  // on board, the next sync replaces the on-board copy.
+  // Only entries that are not on board (NOT_ONBOARD or MISSED) can be updated.
+  // Entries on board have to be replaced instead.
   rpc UpdateEntry(UpdateEntryRequest) returns (ScheduleEntryInfo) {
     option (yamcs.api.route) = {
       patch: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries/{id}"
+      body: "*"
+    };
+  }
+
+  // Replace an entry by a new one.
+  //
+  // Used to change an entry that is already on board: the new entry is inserted
+  // and the old one is removed from the on-board schedule at the next sync.
+  // Returns the new entry.
+  rpc ReplaceEntry(ReplaceEntryRequest) returns (ScheduleEntryInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/entries/{id}:replace"
       body: "*"
     };
   }
@@ -78,32 +90,34 @@ service OnboardSchedulerApi {
     };
   }
 
-  // Compute the steps a sync would execute, without executing them.
+  // Get the changes the next sync would make on board.
   //
-  // If the adapter supports it, the on-board schedule is read back first,
-  // which requires contact with the spacecraft.
-  rpc PlanSync(PlanSyncRequest) returns (SyncInfo) {
+  // Computed from the ground model only, without contacting the spacecraft:
+  // the entries planned, replaced or deleted since the last sync, as far as known
+  // from the latest read back.
+  rpc GetPendingChanges(GetPendingChangesRequest) returns (PendingChangesInfo) {
     option (yamcs.api.route) = {
-      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:planSync"
+      get: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}/pendingChanges"
+    };
+  }
+
+  // Read the on-board schedule and update the state of the ground entries
+  // from it. Nothing is changed on board. Requires contact with the spacecraft.
+  rpc ReadBack(ReadBackRequest) returns (SyncInfo) {
+    option (yamcs.api.route) = {
+      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:readBack"
       body: "*"
     };
   }
 
-  // Synchronise the on-board schedule with the ground plan.
+  // Synchronise the on-board schedule with the ground plan: read back (if
+  // supported), then execute the pending changes and verify them.
+  // Requires contact with the spacecraft.
   //
   // Returns when the sync has finished.
   rpc Sync(SyncRequest) returns (SyncInfo) {
     option (yamcs.api.route) = {
       post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:sync"
-      body: "*"
-    };
-  }
-
-  // Read back the on-board schedule and reconcile the ground entries with it,
-  // without changing anything on board.
-  rpc Refresh(RefreshRequest) returns (SyncInfo) {
-    option (yamcs.api.route) = {
-      post: "/api/onboard-scheduler/{instance}/schedulers/{scheduler}:refresh"
       body: "*"
     };
   }
@@ -149,7 +163,7 @@ message ListEntriesRequest {
   // Include entries with intent DELETED. Default: false
   optional bool includeDeleted = 5;
 
-  // Include the evidence log of each entry. Default: false
+  // Include the full history of each entry (otherwise only its latest record). Default: false
   optional bool details = 6;
 }
 
@@ -191,6 +205,32 @@ message CreateEntryRequest {
   repeated string tags = 8;
 }
 
+message ReplaceEntryRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+
+  // Identifier of the entry to replace
+  optional string id = 3;
+
+  // Qualified command name of the new entry
+  optional string command = 4;
+
+  // Command arguments
+  optional google.protobuf.Struct args = 5;
+
+  // Release time
+  optional google.protobuf.Timestamp releaseTime = 6;
+
+  // Adapter-specific options
+  optional google.protobuf.Struct options = 7;
+
+  optional string description = 8;
+  repeated string tags = 9;
+}
+
 message UpdateEntryRequest {
   // Yamcs instance name
   optional string instance = 1;
@@ -225,7 +265,15 @@ message DeleteEntryRequest {
   optional string id = 3;
 }
 
-message PlanSyncRequest {
+message GetPendingChangesRequest {
+  // Yamcs instance name
+  optional string instance = 1;
+
+  // Scheduler name
+  optional string scheduler = 2;
+}
+
+message ReadBackRequest {
   // Yamcs instance name
   optional string instance = 1;
 
@@ -234,14 +282,6 @@ message PlanSyncRequest {
 }
 
 message SyncRequest {
-  // Yamcs instance name
-  optional string instance = 1;
-
-  // Scheduler name
-  optional string scheduler = 2;
-}
-
-message RefreshRequest {
   // Yamcs instance name
   optional string instance = 1;
 

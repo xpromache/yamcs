@@ -20,17 +20,17 @@ import org.yamcs.obsched.ScheduleEntry;
 import org.yamcs.obsched.SchedulerContext;
 import org.yamcs.protobuf.obsched.EntryIntent;
 import org.yamcs.protobuf.obsched.EntryState;
-import org.yamcs.protobuf.obsched.EvidenceSource;
+import org.yamcs.protobuf.obsched.RecordSource;
 import org.yamcs.protobuf.obsched.ScheduleEntryInfo;
 import org.yamcs.utils.TimeEncoding;
 import org.yamcs.yarch.Tuple;
 
 public class Pus11SchedulerAdapterTest {
 
-    record Evidence(String ref, long time, EvidenceSource source, EntryState state, String message) {
+    record Report(String ref, long time, RecordSource source, EntryState state, String message) {
     }
 
-    List<Evidence> evidence = new ArrayList<>();
+    List<Report> reports = new ArrayList<>();
     Pus11SchedulerAdapter adapter;
 
     @BeforeAll
@@ -64,9 +64,9 @@ public class Pus11SchedulerAdapterTest {
             }
 
             @Override
-            public void reportEvidence(String ref, long time, EvidenceSource source, EntryState state,
+            public void reportStatus(String ref, long time, RecordSource source, EntryState state,
                     String message) {
-                evidence.add(new Evidence(ref, time, source, state, message));
+                reports.add(new Report(ref, time, source, state, message));
             }
         }, config);
     }
@@ -97,16 +97,16 @@ public class Pus11SchedulerAdapterTest {
     }
 
     @Test
-    public void verificationReportsBecomeEvidence() {
-        adapter.processPacket(tmTuple(1000, verificationReport(1, 1, 300, null)), EvidenceSource.DUMP, false);
-        adapter.processPacket(tmTuple(1001, verificationReport(3, 1, 300, null)), EvidenceSource.DUMP, false);
-        adapter.processPacket(tmTuple(1002, verificationReport(8, 1, 300, 5)), EvidenceSource.DUMP, false);
+    public void verificationReportsBecomeStatus() {
+        adapter.processPacket(tmTuple(1000, verificationReport(1, 1, 300, null)), RecordSource.DUMP, false);
+        adapter.processPacket(tmTuple(1001, verificationReport(3, 1, 300, null)), RecordSource.DUMP, false);
+        adapter.processPacket(tmTuple(1002, verificationReport(8, 1, 300, 5)), RecordSource.DUMP, false);
 
-        assertEquals(3, evidence.size());
-        assertEquals(new Evidence("1/300", 1000, EvidenceSource.DUMP, EntryState.RELEASED, "TM[1,1] acceptance"),
-                evidence.get(0));
-        assertEquals(EntryState.STARTED, evidence.get(1).state());
-        var failure = evidence.get(2);
+        assertEquals(3, reports.size());
+        assertEquals(new Report("1/300", 1000, RecordSource.DUMP, EntryState.RELEASED, "TM[1,1] acceptance"),
+                reports.get(0));
+        assertEquals(EntryState.STARTED, reports.get(1).state());
+        var failure = reports.get(2);
         assertEquals(EntryState.FAILED, failure.state());
         assertTrue(failure.message().contains("code 5"), failure.message());
     }
@@ -115,8 +115,8 @@ public class Pus11SchedulerAdapterTest {
     public void otherPacketsAreIgnored() {
         var p = verificationReport(1, 1, 300, null);
         p[7] = 3; // HK
-        adapter.processPacket(tmTuple(1000, p), EvidenceSource.REALTIME, true);
-        assertTrue(evidence.isEmpty());
+        adapter.processPacket(tmTuple(1000, p), RecordSource.REALTIME, true);
+        assertTrue(reports.isEmpty());
     }
 
     static ScheduleEntry entry(EntryState state, EntryIntent intent, String ref, long releaseTime, int revision,

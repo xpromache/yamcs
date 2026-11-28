@@ -36,6 +36,12 @@
           </div>
         }
       </div>
+      @if (data.replace) {
+        <p class="replace-note">
+          This entry is on board. It is not changed: a new entry is created with the values below,
+          and the current one is removed from the on-board schedule at the next sync.
+        </p>
+      }
       <app-command-form
         #commandForm
         [command]="command"
@@ -84,7 +90,7 @@
           appearance="primary"
           (click)="handleOK()"
           [disabled]="!commandForm.form.valid || !scheduleForm.valid">
-          {{ data.entry ? 'SAVE' : 'ADD' }}
+          {{ data.replace ? 'REPLACE' : data.entry ? 'SAVE' : 'ADD' }}
         </ya-button>
       </mat-toolbar-row>
     </mat-toolbar>

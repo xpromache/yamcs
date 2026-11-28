@@ -33,7 +33,7 @@ public interface SyncContext {
      * <p>
      * The command verifiers of the entry command are disabled for the upload. The entry becomes UPLOAD_PENDING and
      * the upload is recorded in its history. The adapter has to call {@link #setUploadRef} once it knows the on-board
-     * reference and report the confirmation of the insert as evidence with state ONBOARD.
+     * reference and report the confirmation of the insert as status ONBOARD.
      */
     IssuedCommand uploadEntry(UUID entryId, Map<String, Object> options);
 

@@ -36,12 +36,14 @@ import org.yamcs.protobuf.Commanding.CommandHistoryAttribute;
 import org.yamcs.protobuf.obsched.EntryIntent;
 import org.yamcs.protobuf.obsched.EntryOptionInfo;
 import org.yamcs.protobuf.obsched.EntryState;
-import org.yamcs.protobuf.obsched.EvidenceSource;
 import org.yamcs.protobuf.obsched.ForeignItemInfo;
+import org.yamcs.protobuf.obsched.PendingChangesInfo;
+import org.yamcs.protobuf.obsched.RecordSource;
 import org.yamcs.protobuf.obsched.SchedulerInfo;
 import org.yamcs.protobuf.obsched.SyncInfo;
 import org.yamcs.protobuf.obsched.SyncStatus;
 import org.yamcs.protobuf.obsched.SyncStepInfo;
+import org.yamcs.protobuf.obsched.SyncType;
 import org.yamcs.security.User;
 import org.yamcs.utils.TimeEncoding;
 import org.yamcs.xtce.MetaCommand;
@@ -52,7 +54,7 @@ import com.google.protobuf.Struct;
  * Ground model of an on-board time-tagged command schedule.
  * <p>
  * Keeps the entries planned on the ground, synchronises them with the on-board schedule through a
- * {@link SchedulerAdapter} and records the execution evidence received in telemetry. One service instance manages one
+ * {@link SchedulerAdapter} and records the execution status received in telemetry. One service instance manages one
  * on-board scheduler; the service name is the scheduler name.
  * <p>
  * See {@code docs/design/onboard-scheduler.md}.
@@ -69,12 +71,10 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
             "pus11", "org.yamcs.pus.Pus11SchedulerAdapter");
 
     public enum SyncMode {
-        /** compute the steps without executing them */
-        PLAN,
-        /** compute and execute the steps */
-        SYNC,
-        /** only read back and reconcile */
-        REFRESH
+        /** read the on-board schedule and reconcile the ground entries with it */
+        READ_BACK,
+        /** read back, then execute the pending changes */
+        SYNC
     }
 
     private String processorName;
@@ -83,6 +83,8 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
     private ScheduleEntryDb db;
     private ScheduledExecutorService executor;
     private long stepTimeout;
+    private long releaseTolerance;
+    private long releaseWindow;
 
     private final Map<UUID, ScheduleEntry> entries = new LinkedHashMap<>();
     private final List<Consumer<ScheduleEntry>> listeners = new CopyOnWriteArrayList<>();
@@ -99,6 +101,14 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         spec.addOption("adapterArgs", OptionType.MAP).withSpec(Spec.ANY).withDefault(new HashMap<>());
         spec.addOption("stepTimeout", OptionType.INTEGER).withDefault(60)
                 .withDescription("Timeout in seconds for one sync step.");
+        spec.addOption("releaseTolerance", OptionType.INTEGER).withDefault(5)
+                .withDescription("Seconds of clock difference tolerated between the release time of an entry and the"
+                        + " time of the telemetry reporting its release.");
+        spec.addOption("releaseWindow", OptionType.INTEGER).withDefault(60)
+                .withDescription("Seconds after the release time during which a release of the entry is expected."
+                        + " Execution reports about the ref of an entry outside this window are attributed to"
+                        + " another command with the same ref (counters wrap or restart) and ignored, unless the"
+                        + " entry is still executing.");
         return spec;
     }
 
@@ -107,6 +117,8 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         super.init(yamcsInstance, serviceName, config);
         processorName = config.getString("processor");
         stepTimeout = config.getInt("stepTimeout") * 1000L;
+        releaseTolerance = config.getInt("releaseTolerance") * 1000L;
+        releaseWindow = config.getInt("releaseWindow") * 1000L;
         executor = Executors.newSingleThreadScheduledExecutor(r -> {
             var t = new Thread(r, "obsched-" + serviceName);
             t.setDaemon(true);
@@ -129,8 +141,12 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         adapter.init(this, adapterArgs);
 
         db = new ScheduleEntryDb(yamcsInstance);
+        long now = getMissionTime();
         for (var e : db.load(serviceName)) {
             entries.put(e.getId(), e);
+            if (cancelDeletionIfReleased(e, now)) {
+                db.save(e);
+            }
         }
         log.debug("Loaded {} schedule entries", entries.size());
     }
@@ -172,29 +188,58 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
     }
 
     @Override
-    public synchronized void reportEvidence(String ref, long time, EvidenceSource source, EntryState state,
+    public synchronized void reportStatus(String ref, long time, RecordSource source, EntryState state,
             String message) {
         ScheduleEntry best = null;
         long bestDistance = Long.MAX_VALUE;
+        boolean known = false;
         for (var e : entries.values()) {
-            if (e.hasRef(ref)) {
-                long d = Math.abs(e.getReleaseTime() - time);
-                if (d < bestDistance) {
-                    best = e;
-                    bestDistance = d;
-                }
+            if (!e.hasRef(ref)) {
+                continue;
+            }
+            known = true;
+            if (!e.isPlausibleReport(ref, time, state, releaseTolerance, releaseWindow)) {
+                continue;
+            }
+            long d = Math.abs(e.getReleaseTime() - time);
+            if (d < bestDistance) {
+                best = e;
+                bestDistance = d;
             }
         }
         if (best == null) {
-            log.debug("Evidence {} for unknown ref {} ignored", state, ref);
+            if (known) {
+                log.debug("Status {} for ref {} at {} ignored: does not fit the release of any entry with that ref",
+                        state, ref, TimeEncoding.toString(time));
+            } else {
+                log.debug("Status {} for unknown ref {} ignored", state, ref);
+            }
             return;
         }
         long now = getMissionTime();
-        boolean changed = best.applyEvidence(time, now, source, state, message);
+        boolean changed = best.applyStatus(time, now, source, state, message);
         if (changed) {
             publishAck(best, ref, state, time, message);
         }
+        cancelDeletionIfReleased(best, now);
         save(best);
+    }
+
+    /**
+     * An entry deleted on the ground but released on board before a sync could remove it has run: its deletion is
+     * cancelled, so that it shows as what happened on board.
+     *
+     * @return true if the entry was changed
+     */
+    private boolean cancelDeletionIfReleased(ScheduleEntry e, long now) {
+        if (e.getIntent() != EntryIntent.DELETE_PENDING || !e.isReleased()) {
+            return false;
+        }
+        e.setIntent(EntryIntent.PLANNED);
+        e.addRecord(now, now, RecordSource.GROUND, null,
+                "Released on board before its deletion could be synced: the deletion is cancelled");
+        log.warn("Entry {} ({}) was released on board although deleted on the ground", e.getId(), e.getCommand());
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -216,7 +261,11 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                 .setName(serviceName)
                 .setAdapter(adapter.getType())
                 .setProcessor(processorName)
-                .setCapabilities(adapter.getCapabilities().toProto());
+                .setCapabilities(adapter.getCapabilities().toProto())
+                .setRefLabel(adapter.getRefLabel());
+        if (adapter.getRefDescription() != null) {
+            b.setRefDescription(adapter.getRefDescription());
+        }
         var filterable = adapter.getFilterableOptions();
         for (var opt : adapter.getEntryOptionsSpec().getOptions()) {
             var ob = EntryOptionInfo.newBuilder().setName(opt.getName()).setType(opt.getType().name())
@@ -278,18 +327,25 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         validate(user, e);
         long now = getMissionTime();
         e.setCreated(now, user.getName());
-        e.addEvidence(now, now, EvidenceSource.GROUND, EntryState.NOT_ONBOARD, "Created by " + user.getName());
+        e.addRecord(now, now, RecordSource.GROUND, EntryState.NOT_ONBOARD, "Created by " + user.getName());
         entries.put(e.getId(), e);
         save(e);
         return e.copy();
     }
 
     /**
-     * Updates an entry. Null arguments are not changed.
+     * Updates an entry that is not on board. Null arguments are not changed.
+     * <p>
+     * An entry that is on board (or being uploaded) cannot be changed, it has to be
+     * {@link #replaceEntry replaced}.
      */
     public synchronized ScheduleEntry updateEntry(User user, UUID id, String command, Struct args, Long releaseTime,
             Struct options, String description, List<String> tags) throws InvalidEntryException {
         var e = verifyEditable(id);
+        if (e.getState() != EntryState.NOT_ONBOARD && e.getState() != EntryState.MISSED) {
+            throw new InvalidEntryException("Entry cannot be changed in state " + e.getState()
+                    + "; replace it by a new entry instead");
+        }
         var candidate = e.copy();
         if (command != null) {
             candidate.setCommand(command);
@@ -335,29 +391,62 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
             var msg = "Revision " + e.getRevision() + " by " + user.getName()
                     + (e.isOnboard() ? "; the on-board copy will be replaced at the next sync" : "");
             if (e.getState() == EntryState.MISSED) {
-                e.forceState(now, EvidenceSource.GROUND, EntryState.NOT_ONBOARD, msg);
+                e.forceState(now, RecordSource.GROUND, EntryState.NOT_ONBOARD, msg);
             } else {
-                e.addEvidence(now, now, EvidenceSource.GROUND, null, msg);
+                e.addRecord(now, now, RecordSource.GROUND, null, msg);
             }
         }
         save(e);
         return e.copy();
     }
 
+    /**
+     * Replaces an entry by a new one: the new entry is created and the old one deleted (removed from the on-board
+     * schedule at the next sync if it is on board).
+     *
+     * @return the new entry
+     */
+    public synchronized ScheduleEntry replaceEntry(User user, UUID id, String command, Struct args, long releaseTime,
+            Struct options, String description, List<String> tags) throws InvalidEntryException {
+        var old = verifyEditable(id);
+        var e = new ScheduleEntry(UUID.randomUUID(), serviceName);
+        e.setCommand(command);
+        e.setArgs(args == null ? Struct.getDefaultInstance() : args);
+        e.setReleaseTime(releaseTime);
+        e.setOptions(options == null ? Struct.getDefaultInstance() : options);
+        e.setDescription(description);
+        if (tags != null) {
+            e.setTags(tags);
+        }
+        validate(user, e);
+        long now = getMissionTime();
+        e.setCreated(now, user.getName());
+        e.addRecord(now, now, RecordSource.GROUND, EntryState.NOT_ONBOARD,
+                "Created by " + user.getName() + " to replace entry " + old.getId());
+        entries.put(e.getId(), e);
+        save(e);
+        markDeleted(user, old, "Replaced by entry " + e.getId() + " by " + user.getName());
+        return e.copy();
+    }
+
     public synchronized ScheduleEntry deleteEntry(User user, UUID id) throws InvalidEntryException {
         var e = verifyEditable(id);
+        markDeleted(user, e, "Deleted by " + user.getName());
+        return e.copy();
+    }
+
+    private void markDeleted(User user, ScheduleEntry e, String message) {
         long now = getMissionTime();
         e.setModified(now, user.getName());
         if (e.isOnboard()) {
             e.setIntent(EntryIntent.DELETE_PENDING);
-            e.addEvidence(now, now, EvidenceSource.GROUND, null,
-                    "Deleted by " + user.getName() + "; will be removed from the on-board schedule at the next sync");
+            e.addRecord(now, now, RecordSource.GROUND, null,
+                    message + "; will be removed from the on-board schedule at the next sync");
         } else {
             e.setIntent(EntryIntent.DELETED);
-            e.addEvidence(now, now, EvidenceSource.GROUND, null, "Deleted by " + user.getName());
+            e.addRecord(now, now, RecordSource.GROUND, null, message);
         }
         save(e);
-        return e.copy();
     }
 
     private ScheduleEntry verifyEditable(UUID id) throws InvalidEntryException {
@@ -406,11 +495,29 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
      * Reads back the on-board schedule (if supported), reconciles the ground entries with it and, depending on the
      * mode, computes and executes the steps bringing the on-board schedule in line with the ground.
      */
+    /**
+     * Computes what the next sync would do, from the ground model only (the spacecraft is not contacted).
+     */
+    public synchronized PendingChangesInfo getPendingChanges() {
+        long now = getMissionTime();
+        long cutover = now + adapter.getCapabilities().minLeadTime();
+        var plan = adapter.planSync(getEntries(Long.MIN_VALUE, Long.MAX_VALUE, false), null, cutover);
+        var b = PendingChangesInfo.newBuilder()
+                .setTime(TimeEncoding.toProtobufTimestamp(now))
+                .addAllWarnings(plan.getWarnings());
+        for (var step : plan.getSteps()) {
+            b.addSteps(SyncStepInfo.newBuilder()
+                    .setDescription(step.getDescription())
+                    .addAllEntryIds(step.getEntryIds().stream().map(UUID::toString).toList()));
+        }
+        return b.build();
+    }
+
     public CompletableFuture<SyncInfo> sync(User user, SyncMode mode) {
         var info = SyncInfo.newBuilder()
                 .setId(UUID.randomUUID().toString())
                 .setStatus(SyncStatus.SYNC_RUNNING)
-                .setDryRun(mode == SyncMode.PLAN)
+                .setType(mode == SyncMode.READ_BACK ? SyncType.READ_BACK : SyncType.SYNC)
                 .setStart(TimeEncoding.toProtobufTimestamp(getMissionTime()))
                 .setUser(user.getName());
         synchronized (this) {
@@ -422,11 +529,14 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         var ctx = new SyncContextImpl(user);
         boolean readBack = adapter.getCapabilities().readBack();
 
-        CompletableFuture<OnboardSnapshot> snapshotFuture = readBack ? adapter.readOnboard(ctx)
-                : CompletableFuture.completedFuture(null);
-        if (mode == SyncMode.REFRESH && !readBack) {
-            snapshotFuture = CompletableFuture
-                    .failedFuture(new UnsupportedOperationException("The adapter cannot read back the schedule"));
+        CompletableFuture<OnboardSnapshot> snapshotFuture;
+        if (readBack) {
+            snapshotFuture = adapter.readOnboard(ctx);
+        } else if (mode == SyncMode.READ_BACK) {
+            snapshotFuture = CompletableFuture.failedFuture(
+                    new UnsupportedOperationException("The " + adapter.getType() + " adapter cannot read back"));
+        } else {
+            snapshotFuture = CompletableFuture.completedFuture(null);
         }
 
         var steps = new ArrayList<SyncStep>();
@@ -436,13 +546,11 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                 if (snapshot != null) {
                     reconcile(snapshot, info);
                 }
-                if (mode == SyncMode.REFRESH) {
+                if (mode == SyncMode.READ_BACK) {
                     return CompletableFuture.completedFuture(null);
                 }
                 long cutover = getMissionTime() + adapter.getCapabilities().minLeadTime();
-                if (mode == SyncMode.SYNC) {
-                    markMissed(cutover);
-                }
+                markMissed(cutover);
                 copies = getEntries(Long.MIN_VALUE, Long.MAX_VALUE, false);
                 var plan = adapter.planSync(copies, snapshot, cutover);
                 info.addAllWarnings(plan.getWarnings());
@@ -452,9 +560,6 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                             .setDescription(step.getDescription())
                             .addAllEntryIds(step.getEntryIds().stream().map(UUID::toString).toList()));
                 }
-            }
-            if (mode == SyncMode.PLAN) {
-                return CompletableFuture.completedFuture(null);
             }
             return executeSteps(ctx, steps, info, 0).thenCompose(v -> {
                 if (!readBack || steps.isEmpty()) {
@@ -480,9 +585,7 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                     info.setStatus(SyncStatus.SYNC_SUCCEEDED);
                 }
                 var built = info.build();
-                if (mode != SyncMode.PLAN) {
-                    lastSync = built;
-                }
+                lastSync = built;
                 return built;
             }
         });
@@ -543,21 +646,21 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
             if (ref != null && onboardRefs.containsKey(ref)) {
                 var s = e.getState();
                 if (s == EntryState.UPLOAD_PENDING || s == EntryState.NOT_ONBOARD || s == EntryState.UNKNOWN) {
-                    e.forceState(now, EvidenceSource.READBACK, EntryState.ONBOARD, "Found in the on-board schedule");
+                    e.forceState(now, RecordSource.READBACK, EntryState.ONBOARD, "Found in the on-board schedule");
                     changed = true;
                 }
             } else if (e.isOnboard()) {
                 if (e.getReleaseTime() <= snapshot.time()) {
-                    e.forceState(now, EvidenceSource.READBACK, EntryState.UNKNOWN,
-                            "Not in the on-board schedule after its release time and no execution evidence");
+                    e.forceState(now, RecordSource.READBACK, EntryState.UNKNOWN,
+                            "Not in the on-board schedule after its release time and no execution report");
                 } else {
-                    e.forceState(now, EvidenceSource.READBACK, EntryState.NOT_ONBOARD,
+                    e.forceState(now, RecordSource.READBACK, EntryState.NOT_ONBOARD,
                             "Missing from the on-board schedule");
                 }
                 changed = true;
                 if (e.getIntent() == EntryIntent.DELETE_PENDING && !e.isOnboard()) {
                     e.setIntent(EntryIntent.DELETED);
-                    e.addEvidence(now, now, EvidenceSource.READBACK, null, "Deletion confirmed by read-back");
+                    e.addRecord(now, now, RecordSource.READBACK, null, "Deletion confirmed by read-back");
                 }
             }
             if (changed) {
@@ -587,7 +690,7 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
         for (var e : entries.values()) {
             if (e.getIntent() == EntryIntent.PLANNED && e.getState() == EntryState.NOT_ONBOARD
                     && e.getReleaseTime() < cutover) {
-                e.forceState(now, EvidenceSource.GROUND, EntryState.MISSED,
+                e.forceState(now, RecordSource.GROUND, EntryState.MISSED,
                         "Not uploaded before its release time");
                 save(e);
             }
@@ -724,7 +827,7 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                 e.addUpload(CommandIds.toStringIdentifier(pc.getCommandId()), now);
                 e.setRef(null);
                 e.setUploadedRevision(e.getRevision());
-                e.forceState(now, EvidenceSource.GROUND, EntryState.UPLOAD_PENDING,
+                e.forceState(now, RecordSource.GROUND, EntryState.UPLOAD_PENDING,
                         "Upload sent (revision " + e.getRevision() + ")");
                 save(e);
             }
@@ -753,14 +856,14 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                 if (ref.equals(e.getRef())) {
                     if (e.getIntent() == EntryIntent.DELETE_PENDING) {
                         e.setIntent(EntryIntent.DELETED);
-                        e.forceState(now, EvidenceSource.GROUND, EntryState.NOT_ONBOARD,
+                        e.forceState(now, RecordSource.GROUND, EntryState.NOT_ONBOARD,
                                 "Deleted from the on-board schedule");
                     } else {
-                        e.forceState(now, EvidenceSource.GROUND, EntryState.NOT_ONBOARD,
+                        e.forceState(now, RecordSource.GROUND, EntryState.NOT_ONBOARD,
                                 "Old copy deleted from the on-board schedule");
                     }
                 } else {
-                    e.addEvidence(now, now, EvidenceSource.GROUND, null,
+                    e.addRecord(now, now, RecordSource.GROUND, null,
                             "Stale copy " + ref + " deleted from the on-board schedule");
                 }
                 var cmdIdStr = e.getUploadCommandId(ref);
@@ -785,7 +888,7 @@ public class OnboardSchedulerService extends AbstractYamcsService implements Sch
                     return;
                 }
                 long now = getMissionTime();
-                e.forceState(now, EvidenceSource.GROUND, EntryState.NOT_ONBOARD, "Upload failed: " + reason);
+                e.forceState(now, RecordSource.GROUND, EntryState.NOT_ONBOARD, "Upload failed: " + reason);
                 var upload = e.getLatestUpload();
                 if (upload != null) {
                     try {

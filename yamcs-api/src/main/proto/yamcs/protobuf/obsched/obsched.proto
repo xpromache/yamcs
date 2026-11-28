@@ -51,11 +51,11 @@ enum EntryState {
   // On board but not released (e.g. disabled sub-schedule)
   SKIPPED = 9;
 
-  // Should have been released, but there is no evidence of what happened
+  // Should have been released, but there is no information about what happened
   UNKNOWN = 10;
 }
 
-enum EvidenceSource {
+enum RecordSource {
   // A ground action (create, edit, upload command sent, ...)
   GROUND = 1;
 
@@ -69,16 +69,16 @@ enum EvidenceSource {
   READBACK = 4;
 }
 
-message EvidenceInfo {
-  // When the evidence was produced (on-board generation time for TM)
+message HistoryRecordInfo {
+  // When the event happened (on-board generation time for TM)
   optional google.protobuf.Timestamp time = 1;
 
-  // When the evidence was received by Yamcs
+  // When the information was received by Yamcs
   optional google.protobuf.Timestamp receptionTime = 2;
 
-  optional EvidenceSource source = 3;
+  optional RecordSource source = 3;
 
-  // State implied by this evidence (unset for evidence that does not change the state)
+  // State implied by this record (unset for records that do not change the state)
   optional EntryState state = 4;
 
   optional string message = 5;
@@ -141,7 +141,7 @@ message ScheduleEntryInfo {
   optional string modifiedBy = 18;
 
   repeated UploadInfo uploads = 19;
-  repeated EvidenceInfo evidence = 20;
+  repeated HistoryRecordInfo history = 20;
 }
 
 message SchedulerCapabilitiesInfo {
@@ -170,11 +170,17 @@ message SchedulerInfo {
 
   optional SchedulerCapabilitiesInfo capabilities = 4;
 
-  // Latest sync (if any)
+  // Latest read back or sync (if any)
   optional SyncInfo lastSync = 5;
 
   // Names of the adapter-specific entry options
   repeated EntryOptionInfo entryOptions = 6;
+
+  // Short name of the on-board reference of the entries (e.g. "APID/Seq" for PUS)
+  optional string refLabel = 7;
+
+  // Explanation of the on-board reference
+  optional string refDescription = 8;
 }
 
 message EntryOptionInfo {
@@ -214,10 +220,19 @@ message ForeignItemInfo {
   optional string description = 3;
 }
 
+enum SyncType {
+  // Read the on-board schedule and update the ground states from it
+  READ_BACK = 1;
+
+  // Read back, then insert and delete on board so that it matches the ground plan
+  SYNC = 2;
+}
+
+// Result of an interaction with the on-board schedule (read back or sync)
 message SyncInfo {
   optional string id = 1;
   optional SyncStatus status = 2;
-  optional bool dryRun = 3;
+  optional SyncType type = 3;
   optional google.protobuf.Timestamp start = 4;
   optional google.protobuf.Timestamp stop = 5;
   optional string user = 6;
@@ -225,4 +240,14 @@ message SyncInfo {
   repeated ForeignItemInfo foreignItems = 8;
   repeated string warnings = 9;
   optional string failureReason = 10;
+}
+
+// What the next sync would do, computed from the ground model only
+// (without contacting the spacecraft)
+message PendingChangesInfo {
+  // When the changes were computed
+  optional google.protobuf.Timestamp time = 1;
+
+  repeated SyncStepInfo steps = 2;
+  repeated string warnings = 3;
 }

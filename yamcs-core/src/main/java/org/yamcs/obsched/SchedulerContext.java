@@ -4,7 +4,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import org.yamcs.Processor;
 import org.yamcs.protobuf.obsched.EntryState;
-import org.yamcs.protobuf.obsched.EvidenceSource;
+import org.yamcs.protobuf.obsched.RecordSource;
 
 /**
  * What the {@link OnboardSchedulerService} offers to its {@link SchedulerAdapter} for the lifetime of the service.
@@ -29,22 +29,22 @@ public interface SchedulerContext {
     ScheduledExecutorService getExecutor();
 
     /**
-     * Reports evidence about an on-board copy of an entry, for example a verification report received in telemetry.
+     * Reports the status of an on-board copy of an entry, for example a verification report received in telemetry.
      * <p>
      * The engine resolves the reference to an entry (if several entries had the same reference over time, the one with
-     * the release time closest to {@code time}). The state is only applied if it moves the entry forward. Evidence for
+     * the release time closest to {@code time}). The state is only applied if it moves the entry forward. Reports for
      * unknown references is logged and ignored.
      *
      * @param ref
      *            on-board reference
      * @param time
-     *            when the evidence was produced (generation time of the telemetry)
+     *            when the event happened on board (generation time of the telemetry)
      * @param source
-     *            where the evidence comes from
+     *            where the information comes from
      * @param state
-     *            the state implied by the evidence, or null if the evidence does not imply a state
+     *            the state of the entry, or null if the report does not imply a state
      * @param message
      *            optional detail, e.g. a failure code
      */
-    void reportEvidence(String ref, long time, EvidenceSource source, EntryState state, String message);
+    void reportStatus(String ref, long time, RecordSource source, EntryState state, String message);
 }

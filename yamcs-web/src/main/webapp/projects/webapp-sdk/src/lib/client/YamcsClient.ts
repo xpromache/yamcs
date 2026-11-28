@@ -161,6 +161,7 @@ import {
 import {
   CreateScheduleEntryRequest,
   ListOnboardSchedulersResponse,
+  PendingChangesInfo,
   ListScheduleEntriesOptions,
   ListScheduleEntriesResponse,
   OnboardScheduler,
@@ -815,6 +816,23 @@ export default class YamcsClient implements HttpHandler {
     return (await response.json()) as ScheduleEntry;
   }
 
+  /**
+   * Replaces an entry by a new one, returns the new entry. Used for entries that are on board.
+   */
+  async replaceScheduleEntry(
+    instance: string,
+    scheduler: string,
+    id: string,
+    options: CreateScheduleEntryRequest,
+  ) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries/${id}:replace`;
+    const response = await this.doFetch(url, {
+      body: JSON.stringify(options),
+      method: 'POST',
+    });
+    return (await response.json()) as ScheduleEntry;
+  }
+
   async deleteScheduleEntry(instance: string, scheduler: string, id: string) {
     const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/entries/${id}`;
     const response = await this.doFetch(url, { method: 'DELETE' });
@@ -822,13 +840,18 @@ export default class YamcsClient implements HttpHandler {
   }
 
   /**
-   * mode: planSync (dry run), sync or refresh (read back only)
+   * What the next sync would do, computed on the ground only.
    */
-  async syncOnboardSchedule(
-    instance: string,
-    scheduler: string,
-    mode: 'planSync' | 'sync' | 'refresh',
-  ) {
+  async getPendingScheduleChanges(instance: string, scheduler: string) {
+    const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}/pendingChanges`;
+    const response = await this.doFetch(url);
+    return (await response.json()) as PendingChangesInfo;
+  }
+
+  /**
+   * Interacts with the on-board schedule: readBack (read and reconcile only) or sync.
+   */
+  async syncOnboardSchedule(instance: string, scheduler: string, mode: 'readBack' | 'sync') {
     const url = `${this.apiUrl}/onboard-scheduler/${instance}/schedulers/${scheduler}:${mode}`;
     const response = await this.doFetch(url, { body: '{}', method: 'POST' });
     return (await response.json()) as SyncInfo;

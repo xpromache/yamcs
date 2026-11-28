@@ -14,12 +14,12 @@ export type EntryState =
   | 'SKIPPED'
   | 'UNKNOWN';
 
-export type EvidenceSource = 'GROUND' | 'REALTIME' | 'DUMP' | 'READBACK';
+export type RecordSource = 'GROUND' | 'REALTIME' | 'DUMP' | 'READBACK';
 
-export interface EntryEvidence {
+export interface HistoryRecord {
   time: string;
   receptionTime: string;
-  source: EvidenceSource;
+  source: RecordSource;
   state?: EntryState;
   message?: string;
 }
@@ -51,7 +51,7 @@ export interface ScheduleEntry {
   modified?: string;
   modifiedBy?: string;
   uploads?: EntryUpload[];
-  evidence?: EntryEvidence[];
+  history?: HistoryRecord[];
 }
 
 export interface SchedulerCapabilities {
@@ -87,7 +87,7 @@ export interface ForeignItem {
 export interface SyncInfo {
   id: string;
   status: 'SYNC_RUNNING' | 'SYNC_SUCCEEDED' | 'SYNC_FAILED';
-  dryRun: boolean;
+  type: 'READ_BACK' | 'SYNC';
   start: string;
   stop?: string;
   user: string;
@@ -97,6 +97,13 @@ export interface SyncInfo {
   failureReason?: string;
 }
 
+/** What the next sync would do, computed on the ground only */
+export interface PendingChangesInfo {
+  time: string;
+  steps?: SyncStep[];
+  warnings?: string[];
+}
+
 export interface OnboardScheduler {
   name: string;
   adapter: string;
@@ -104,6 +111,10 @@ export interface OnboardScheduler {
   capabilities: SchedulerCapabilities;
   lastSync?: SyncInfo;
   entryOptions?: EntryOptionInfo[];
+  /** Short name of the on-board reference of the entries (e.g. "APID/Seq" for PUS) */
+  refLabel?: string;
+  /** Explanation of the on-board reference */
+  refDescription?: string;
 }
 
 export interface ListOnboardSchedulersResponse {

@@ -24,8 +24,10 @@ import org.yamcs.protobuf.obsched.ListEntriesRequest;
 import org.yamcs.protobuf.obsched.ListEntriesResponse;
 import org.yamcs.protobuf.obsched.ListSchedulersRequest;
 import org.yamcs.protobuf.obsched.ListSchedulersResponse;
-import org.yamcs.protobuf.obsched.PlanSyncRequest;
-import org.yamcs.protobuf.obsched.RefreshRequest;
+import org.yamcs.protobuf.obsched.GetPendingChangesRequest;
+import org.yamcs.protobuf.obsched.PendingChangesInfo;
+import org.yamcs.protobuf.obsched.ReadBackRequest;
+import org.yamcs.protobuf.obsched.ReplaceEntryRequest;
 import org.yamcs.protobuf.obsched.ScheduleEntryInfo;
 import org.yamcs.protobuf.obsched.SchedulerInfo;
 import org.yamcs.protobuf.obsched.SubscribeEntriesRequest;
@@ -118,6 +120,30 @@ public class OnboardSchedulerApi extends AbstractOnboardSchedulerApi<Context> {
     }
 
     @Override
+    public void replaceEntry(Context ctx, ReplaceEntryRequest request, Observer<ScheduleEntryInfo> observer) {
+        ctx.checkSystemPrivilege(SystemPrivilege.ControlOnboardSchedule);
+        var service = verifyService(request.getInstance(), request.getScheduler());
+        var id = verifyEntry(service, request.getId()).getId();
+        if (!request.hasCommand()) {
+            throw new BadRequestException("command is required");
+        }
+        if (!request.hasReleaseTime()) {
+            throw new BadRequestException("releaseTime is required");
+        }
+        try {
+            var e = service.replaceEntry(ctx.user, id, request.getCommand(),
+                    request.hasArgs() ? request.getArgs() : null,
+                    TimeEncoding.fromProtobufTimestamp(request.getReleaseTime()),
+                    request.hasOptions() ? request.getOptions() : null,
+                    request.hasDescription() ? request.getDescription() : null,
+                    request.getTagsList());
+            observer.complete(e.toProto(true));
+        } catch (InvalidEntryException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+    }
+
+    @Override
     public void deleteEntry(Context ctx, DeleteEntryRequest request, Observer<ScheduleEntryInfo> observer) {
         ctx.checkSystemPrivilege(SystemPrivilege.ControlOnboardSchedule);
         var service = verifyService(request.getInstance(), request.getScheduler());
@@ -130,10 +156,18 @@ public class OnboardSchedulerApi extends AbstractOnboardSchedulerApi<Context> {
     }
 
     @Override
-    public void planSync(Context ctx, PlanSyncRequest request, Observer<SyncInfo> observer) {
+    public void getPendingChanges(Context ctx, GetPendingChangesRequest request,
+            Observer<PendingChangesInfo> observer) {
+        ctx.checkSystemPrivilege(SystemPrivilege.ReadOnboardSchedule);
+        var service = verifyService(request.getInstance(), request.getScheduler());
+        observer.complete(service.getPendingChanges());
+    }
+
+    @Override
+    public void readBack(Context ctx, ReadBackRequest request, Observer<SyncInfo> observer) {
         ctx.checkSystemPrivilege(SystemPrivilege.ControlOnboardSchedule);
         var service = verifyService(request.getInstance(), request.getScheduler());
-        runSync(ctx, service, SyncMode.PLAN, observer);
+        runSync(ctx, service, SyncMode.READ_BACK, observer);
     }
 
     @Override
@@ -141,13 +175,6 @@ public class OnboardSchedulerApi extends AbstractOnboardSchedulerApi<Context> {
         ctx.checkSystemPrivilege(SystemPrivilege.ControlOnboardSchedule);
         var service = verifyService(request.getInstance(), request.getScheduler());
         runSync(ctx, service, SyncMode.SYNC, observer);
-    }
-
-    @Override
-    public void refresh(Context ctx, RefreshRequest request, Observer<SyncInfo> observer) {
-        ctx.checkSystemPrivilege(SystemPrivilege.ControlOnboardSchedule);
-        var service = verifyService(request.getInstance(), request.getScheduler());
-        runSync(ctx, service, SyncMode.REFRESH, observer);
     }
 
     private void runSync(Context ctx, OnboardSchedulerService service, SyncMode mode, Observer<SyncInfo> observer) {

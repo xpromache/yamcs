@@ -8,10 +8,14 @@
           planned at any time, also during LOS.
         </p>
         <p>
-          <strong>Sync</strong> reads the on-board schedule back (if supported), reconciles the
-          entries with it, then inserts, deletes or replaces on-board entries so that the
-          on-board schedule matches the ground plan. <strong>Plan sync</strong> only shows what a
-          sync would do. <strong>Read back</strong> only reconciles.
+          <strong>Pending changes</strong> shows at all times what the next sync will do on board,
+          computed on the ground: entries to insert, and entries deleted or replaced on the ground
+          that are to be removed from board.
+        </p>
+        <p>
+          <strong>Read back</strong> reads the on-board schedule and updates the state of the
+          entries from it. <strong>Sync</strong> reads back, then makes the pending changes on
+          board and verifies them. Both need contact with the spacecraft.
         </p>
         <p>
           The state of each entry is updated from telemetry, including telemetry recorded on
@@ -21,29 +25,27 @@
     </ng-template>
 
     @if (scheduler$ | async; as scheduler) {
-      <ya-page-button (click)="addEntry()" icon="add_circle">Add entry</ya-page-button>
+      <ya-page-button
+        (click)="addEntry()"
+        icon="add_circle"
+        matTooltip="Plan a new command in the ground schedule. Nothing is sent until the next sync.">
+        Add entry
+      </ya-page-button>
       @if (scheduler.capabilities.readBack) {
         <ya-page-button
-          (click)="sync('refresh')"
+          (click)="sync('readBack')"
           icon="download"
+          matTooltip="Read the on-board schedule and update the state of the entries from it. Nothing is changed on board. Needs contact with the spacecraft."
           [disabled]="(syncing$ | async) !== null">
           Read back
         </ya-page-button>
       }
       <ya-page-button
-        (click)="sync('planSync')"
-        icon="preview"
-        [disabled]="(syncing$ | async) !== null">
-        Plan sync
-      </ya-page-button>
-      <ya-page-button
         (click)="sync('sync')"
         icon="sync"
+        matTooltip="Read back, then make the pending changes on board: delete the entries deleted or replaced on the ground and insert the new ones. Needs contact with the spacecraft."
         [disabled]="(syncing$ | async) !== null">
         Sync
-      </ya-page-button>
-      <ya-page-button (click)="toggleDeleted()" icon="delete_sweep">
-        {{ showDeleted ? 'Hide deleted' : 'Show deleted' }}
       </ya-page-button>
     }
   </ya-instance-toolbar>
@@ -78,40 +80,79 @@
 
       @if (syncing$ | async; as mode) {
         <p class="hint">
-          {{ mode === 'planSync' ? 'Planning sync' : mode === 'sync' ? 'Syncing' : 'Reading back' }}…
+          {{ mode === 'sync' ? 'Syncing' : 'Reading back' }}…
         </p>
       }
 
-      @if (filterValues$ | async; as filters) {
-        @if (filters.length) {
-          <ya-filter-bar [formGroup]="filterForm">
-            @for (f of filters; track f.option.name) {
-              <ya-select [formControlName]="f.option.name">
-                <ya-option id="" [label]="'Any ' + (f.option.description || f.option.name)" />
-                @for (v of f.values; track v) {
-                  <ya-option
-                    [id]="v"
-                    [label]="(f.option.description || f.option.name) + ': ' + optionLabel(v)" />
-                }
-              </ya-select>
-            }
-          </ya-filter-bar>
-        }
+      @if (pendingChanges$ | async; as pending) {
+        <div class="pending" [class.none]="!pending.steps?.length">
+          @if (pending.steps?.length) {
+            <div class="pending-title">
+              <mat-icon class="pending-icon">pending_actions</mat-icon>
+              Pending changes: the next sync will
+            </div>
+            <ul>
+              @for (step of pending.steps; track $index) {
+                <li>{{ step.description }}</li>
+              }
+            </ul>
+          } @else {
+            <mat-icon class="pending-icon">check</mat-icon>
+            No pending changes: the on-board schedule matches the plan, as far as known on the
+            ground.
+          }
+          @for (w of pending.warnings; track $index) {
+            <div class="warning">{{ w }}</div>
+          }
+        </div>
       }
+
+      <ya-filter-bar [formGroup]="filterForm">
+        @for (f of (filterValues$ | async) || []; track f.option.name) {
+          <ya-select [formControlName]="f.option.name">
+            <ya-option id="" [label]="'Any ' + (f.option.description || f.option.name)" />
+            @for (v of f.values; track v) {
+              <ya-option
+                [id]="v"
+                [label]="(f.option.description || f.option.name) + ': ' + optionLabel(v)" />
+            }
+          </ya-select>
+        }
+        <ya-select formControlName="deleted">
+          <ya-option id="" label="Without deleted entries" />
+          <ya-option id="show" label="With deleted entries" />
+        </ya-select>
+      </ya-filter-bar>
 
       <table yaDataTable style="width: 100%">
         <tr>
-          <th>Release time</th>
-          <th>Command</th>
-          <th>State</th>
-          <th>Intent</th>
-          <th>Ref</th>
-          <th>Rev</th>
-          <th>Last evidence</th>
+          <th class="help" matTooltip="Time at which the on-board scheduler releases the command">
+            Release time
+          </th>
+          <th
+            class="help"
+            matTooltip="Command to release, with its arguments and the scheduler options (default values in grey)">
+            Command
+          </th>
+          <th
+            class="help"
+            matTooltip="Where the entry is on board, from the latest update: NOT_ONBOARD, UPLOAD_PENDING, ONBOARD, then RELEASED, STARTED and COMPLETED or FAILED from telemetry. MISSED: release time passed before it could be uploaded. UNKNOWN: release time passed while not confirmed on board, no telemetry about it yet. A delete icon marks an entry deleted on the ground and still to be removed from board at the next sync.">
+            State
+          </th>
+          <th class="help" [matTooltip]="scheduler.refDescription || 'Reference of the entry on board'">
+            {{ scheduler.refLabel || 'Ref' }}
+          </th>
+          <th
+            class="help"
+            matTooltip="Latest information about the entry, with its source: GROUND (user action or sync), REALTIME or DUMP (telemetry received live or dumped after LOS), READBACK (on-board schedule report)">
+            Last update
+          </th>
           <th></th>
         </tr>
         @for (entry of entries$ | async; track entry.id) {
-          <tr [class.deleted]="entry.intent !== 'PLANNED'">
+          <tr
+            [class.delete-pending]="entry.intent === 'DELETE_PENDING'"
+            [class.deleted]="entry.intent === 'DELETED'">
             <td style="white-space: nowrap">{{ entry.releaseTime | datetime }}</td>
             <td>
               {{ entry.command }}
@@ -138,32 +179,53 @@
             </td>
             <td>
               <span class="state" [ngClass]="stateClass(entry)">{{ entry.state }}</span>
-            </td>
-            <td>{{ entry.intent }}</td>
-            <td>{{ entry.ref || '-' }}</td>
-            <td>
-              {{ entry.revision }}
-              @if (entry.uploadedRevision && entry.uploadedRevision !== entry.revision) {
-                <span class="hint">(on board: {{ entry.uploadedRevision }})</span>
+              @if (entry.intent === 'DELETE_PENDING') {
+                <mat-icon
+                  class="intent-icon"
+                  matTooltip="Deleted on the ground: will be removed from the on-board schedule at the next sync">
+                  delete
+                </mat-icon>
+              } @else if (entry.intent === 'DELETED') {
+                <span class="hint">deleted</span>
+              }
+              @if (pendingFor(entry); as pending) {
+                <mat-icon class="pending-row-icon" [matTooltip]="'Next sync: ' + pending">
+                  pending_actions
+                </mat-icon>
               }
             </td>
-            <td class="evidence">
-              @if (lastEvidence(entry); as ev) {
+            <td>{{ entry.ref || '-' }}</td>
+            <td class="last-update">
+              @if (lastRecord(entry); as ev) {
                 {{ ev.message }}
                 <div class="hint">{{ ev.source }} &middot; {{ ev.time | datetime }}</div>
               }
             </td>
             <td style="text-align: right; white-space: nowrap">
-              <ya-icon-action icon="list" matTooltip="Evidence" (click)="toggleDetails(entry)" />
-              @if (isEditable(entry)) {
-                <ya-icon-action icon="edit" matTooltip="Edit" (click)="editEntry(entry)" />
-                <ya-icon-action icon="delete" matTooltip="Delete" (click)="deleteEntry(entry)" />
+              <ya-icon-action icon="list" matTooltip="Show the history of the entry: state changes, uploads and telemetry reports" (click)="toggleDetails(entry)" />
+              @if (canEdit(entry)) {
+                <ya-icon-action
+                  icon="edit"
+                  matTooltip="Change the entry (only possible while it is not on board)"
+                  (click)="editEntry(entry)" />
+              }
+              @if (canReplace(entry)) {
+                <ya-icon-action
+                  icon="swap_horiz"
+                  matTooltip="Replace the entry by a new one. The current one is removed from the on-board schedule at the next sync."
+                  (click)="editEntry(entry, true)" />
+              }
+              @if (canDelete(entry)) {
+                <ya-icon-action
+                  icon="delete"
+                  matTooltip="Delete the entry. If it is on board, it is removed from the on-board schedule at the next sync."
+                  (click)="deleteEntry(entry)" />
               }
             </td>
           </tr>
           @if ((expanded$ | async)?.id === entry.id) {
             <tr>
-              <td colspan="8" class="details">
+              <td colspan="6" class="details">
                 @let details = expanded$ | async;
                 @if (hasValues(details?.args)) {
                   <h4>Arguments</h4>
@@ -183,16 +245,26 @@
                     }
                   </dl>
                 }
-                <h4>Evidence</h4>
+                <h4>History</h4>
                 <table yaDataTable style="width: 100%">
                   <tr>
-                    <th>Time</th>
-                    <th>Received</th>
-                    <th>Source</th>
-                    <th>State</th>
+                    <th class="help" matTooltip="Time of the event (on-board time for telemetry)">
+                      Time
+                    </th>
+                    <th class="help" matTooltip="Time the information reached the ground">
+                      Received
+                    </th>
+                    <th
+                      class="help"
+                      matTooltip="GROUND (user action or sync), REALTIME, DUMP (recorded on board and dumped) or READBACK">
+                      Source
+                    </th>
+                    <th class="help" matTooltip="State the entry moved to, if any">
+                      State
+                    </th>
                     <th>Message</th>
                   </tr>
-                  @for (ev of details?.evidence; track $index) {
+                  @for (ev of details?.history; track $index) {
                     <tr>
                       <td>{{ ev.time | datetime }}</td>
                       <td>{{ ev.receptionTime | datetime }}</td>
@@ -206,7 +278,7 @@
                   <p class="hint">
                     Uploads (command history ids):
                     @for (u of details?.uploads; track u.commandId) {
-                      {{ u.commandId }} (rev {{ u.revision }}, ref {{ u.ref || '-' }})&nbsp;
+                      {{ u.commandId }} (rev {{ u.revision }}, {{ scheduler.refLabel || 'ref' }} {{ u.ref || '-' }})&nbsp;
                     }
                   </p>
                 }
@@ -215,14 +287,14 @@
           }
         } @empty {
           <tr>
-            <td colspan="8">No entries</td>
+            <td colspan="6">No entries</td>
           </tr>
         }
       </table>
 
       @if (syncResult$ | async; as result) {
         <h3>
-          {{ result.dryRun ? 'Planned sync' : 'Last sync' }}: {{ result.status }}
+          {{ result.type === 'READ_BACK' ? 'Last read back' : 'Last sync' }}: {{ result.status }}
           <span class="hint">{{ result.start | datetime }} by {{ result.user }}</span>
         </h3>
         @if (result.failureReason) {
@@ -241,8 +313,8 @@
               </tr>
             }
           </table>
-        } @else {
-          <p class="hint">Nothing to change on board.</p>
+        } @else if (result.type === 'SYNC') {
+          <p class="hint">Nothing was changed on board.</p>
         }
         @for (w of result.warnings; track $index) {
           <p class="warning">{{ w }}</p>

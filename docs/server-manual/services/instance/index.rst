@@ -19,6 +19,7 @@ Instance Services
     xtce-tm-recorder
     time-correlation
     timeline-service
+    onboard-scheduler
     replication-master
     replication-slave
     cfdp
